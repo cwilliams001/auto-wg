@@ -1,5 +1,7 @@
 # Auto-WireGuard (auto-wg)
 
+### NOTE: This project is in its early stages and should be considered experimental, and is not production-ready. Use at your own risk.
+
 A streamlined, self-hosted WireGuard VPN configuration and management system. Inspired by Tailscale, `auto-wg` simplifies VPN setup by automating server provisioning, configuration, and client onboarding.
 
 ---
