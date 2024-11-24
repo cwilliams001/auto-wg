@@ -1,0 +1,12 @@
+---
+wireguard_config_path: /etc/wireguard/wg0.conf
+wireguard_network: "10.0.0.0/24"
+wireguard_address: "10.0.0.1/24"
+wireguard_port: 51820
+wireguard_dns_servers: 
+  - "8.8.8.8"
+  - "8.8.4.4"
+wg_service_dir: /opt/wg_service
+wg_service_port: 5000
+auth_keys:
+  - "some-random-key-2024"

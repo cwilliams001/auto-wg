@@ -1,0 +1,14 @@
+[Unit]
+Description=WireGuard Configuration Service
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/wg_service
+ExecStart=/usr/bin/python3 /opt/wg_service/wg_server.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,31 @@
+---
+- hosts: wireguard_servers
+  become: yes
+  vars_files:
+    - vars/main.yml
+  
+  roles:
+    - common
+    - wireguard
+    - wg_service
+
+  post_tasks:
+    - name: Enable IP forwarding
+      sysctl:
+        name: net.ipv4.ip_forward
+        value: '1'
+        sysctl_set: yes
+        state: present
+        reload: yes
+
+    - name: Allow WireGuard port
+      ufw:
+        rule: allow
+        port: "{{ wireguard_port }}"
+        proto: udp
+
+    - name: Allow WG service port
+      ufw:
+        rule: allow
+        port: "{{ wg_service_port }}"
+        proto: tcp

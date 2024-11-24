@@ -1,0 +1,252 @@
+from flask import Flask, request, jsonify
+import subprocess
+import ipaddress
+import json
+import os
+import secrets
+import logging
+
+app = Flask(__name__)
+
+# Set up logging
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
+
+# Configuration
+WG_CONFIG_PATH = "{{ wireguard_config_path | default('/etc/wireguard/wg0.conf') }}"
+ALLOWED_KEYS = {{ auth_keys | to_json }}
+BASE_IP = "10.0.0"  # Hardcoded for consistent format
+USED_IPS_FILE = "{{ wg_service_dir }}/used_ips.json"
+
+# WireGuard Server Configuration
+SERVER_PUBLIC_KEY = "{{ wg_public_key }}"
+SERVER_ENDPOINT = "{{ ansible_host }}"
+SERVER_PORT = {{ wireguard_port }}
+NETWORK_CIDR = "{{ wireguard_network }}"
+
+def load_used_ips():
+    try:
+        if os.path.exists(USED_IPS_FILE):
+            with open(USED_IPS_FILE, 'r') as f:
+                content = f.read().strip()
+                if not content:  # If file is empty
+                    return {}
+                return json.loads(content)
+        else:
+            # Initialize the file with an empty JSON object
+            with open(USED_IPS_FILE, 'w') as f:
+                json.dump({}, f)
+            return {}
+    except Exception as e:
+        logger.error(f"Error loading used IPs: {str(e)}")
+        # Instead of raising, return empty dict
+        return {}
+
+def get_next_available_ip():
+    try:
+        used_ips = load_used_ips()
+        used_ip_addresses = set(used_ips.values())
+        
+        # Start from .2 since .1 is typically the server
+        for i in range(2, 255):
+            candidate_ip = f"{BASE_IP}.{i}"  # This will create IPs like 10.0.0.2
+            if candidate_ip not in used_ip_addresses:
+                logger.debug(f"Found available IP: {candidate_ip}")
+                # Validate IP format
+                ipaddress.ip_address(candidate_ip)
+                return candidate_ip
+                
+        raise Exception("No available IPs in the subnet")
+    except Exception as e:
+        logger.error(f"Error getting next available IP: {str(e)}")
+        raise
+
+def generate_wireguard_keys():
+    try:
+        logger.debug("Generating WireGuard keys")
+        private_key = subprocess.check_output(["wg", "genkey"]).decode().strip()
+        public_key = subprocess.check_output(["wg", "pubkey"], input=private_key.encode()).decode().strip()
+        return private_key, public_key
+    except Exception as e:
+        logger.error(f"Error generating WireGuard keys: {str(e)}")
+        raise
+
+def clean_config_file():
+    """Remove any malformed entries from the config file"""
+    try:
+        if os.path.exists(WG_CONFIG_PATH):
+            with open(WG_CONFIG_PATH, 'r') as f:
+                lines = f.readlines()
+            
+            # Filter out any lines with malformed IPs
+            cleaned_lines = []
+            for line in lines:
+                if line.strip().startswith('AllowedIPs'):
+                    # Validate IP format
+                    try:
+                        ip = line.split('=')[1].strip().split('/')[0]
+                        ipaddress.ip_address(ip)
+                        cleaned_lines.append(line)
+                    except:
+                        logger.warning(f"Removing malformed IP line: {line}")
+                else:
+                    cleaned_lines.append(line)
+            
+            # Write back cleaned config
+            with open(WG_CONFIG_PATH, 'w') as f:
+                f.writelines(cleaned_lines)
+    except Exception as e:
+        logger.error(f"Error cleaning config file: {str(e)}")
+
+def reload_wireguard():
+    """Reload WireGuard configuration"""
+    try:
+        # First check if the interface exists
+        logger.debug("Checking WireGuard interface status")
+        subprocess.run(["wg", "show"], check=True, capture_output=True, text=True)
+        
+        # Try syncconf first
+        logger.debug("Attempting to sync WireGuard config")
+        subprocess.run(["wg", "syncconf", "wg0", WG_CONFIG_PATH], check=True, capture_output=True, text=True)
+        logger.info("WireGuard configuration reloaded successfully")
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Error reloading WireGuard: {str(e)}")
+        logger.error(f"Command output: {e.output if hasattr(e, 'output') else 'No output'}")
+        
+        # Try restarting the service if syncconf fails
+        try:
+            logger.debug("Attempting to restart WireGuard service")
+            subprocess.run(["systemctl", "restart", "wg-quick@wg0"], check=True, capture_output=True, text=True)
+            logger.info("WireGuard service restarted successfully")
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Error restarting WireGuard service: {str(e)}")
+            logger.error(f"Command output: {e.output if hasattr(e, 'output') else 'No output'}")
+            raise
+
+@app.route('/generate_config', methods=['POST'])
+def generate_config():
+    try:
+        # Debug logging
+        logger.debug(f"Received headers: {dict(request.headers)}")
+        logger.debug(f"Received raw data: {request.get_data(as_text=True)}")
+        
+        auth_key = request.headers.get('Authorization')
+        logger.debug(f"Received request with auth key: {auth_key}")
+        
+        # Debug the request body
+        try:
+            request_json = request.get_json()
+            logger.debug(f"Parsed JSON: {request_json}")
+        except Exception as e:
+            logger.error(f"Error parsing JSON: {str(e)}")
+            return jsonify({"error": f"Invalid JSON format: {str(e)}"}), 400
+
+        if auth_key not in ALLOWED_KEYS:
+            logger.warning(f"Unauthorized access attempt with key: {auth_key}")
+            return jsonify({"error": "Unauthorized"}), 401
+
+        client_name = request_json.get('client_name')
+        if not client_name:
+            logger.warning("Missing client name in request")
+            return jsonify({"error": "Client name required"}), 400
+
+        logger.info(f"Generating config for client: {client_name}")
+        
+        # Clean config file before adding new peer
+        clean_config_file()
+        
+        # Generate keys and IP
+        private_key, public_key = generate_wireguard_keys()
+        client_ip = get_next_available_ip()
+        
+        # Validate IP format
+        try:
+            ipaddress.ip_address(client_ip)
+            logger.debug(f"Valid IP address generated: {client_ip}")
+        except ValueError as e:
+            logger.error(f"Invalid IP address generated: {client_ip}")
+            raise Exception(f"Invalid IP address format: {client_ip}")
+
+        # Create client config
+        client_config = f"""[Interface]
+PrivateKey = {private_key}
+Address = {client_ip}/24
+DNS = 8.8.8.8, 8.8.4.4
+
+[Peer]
+PublicKey = {SERVER_PUBLIC_KEY}
+Endpoint = {SERVER_ENDPOINT}:{SERVER_PORT}
+AllowedIPs = {NETWORK_CIDR}
+PersistentKeepalive = 25"""
+
+        # Update server config
+        server_config_addition = f"""
+# {client_name}
+[Peer]
+PublicKey = {public_key}
+AllowedIPs = {client_ip}/32
+"""
+        
+        # Backup the current config
+        if os.path.exists(WG_CONFIG_PATH):
+            backup_path = f"{WG_CONFIG_PATH}.bak"
+            with open(WG_CONFIG_PATH, 'r') as src, open(backup_path, 'w') as dst:
+                dst.write(src.read())
+        
+        # Append new peer to server config
+        with open(WG_CONFIG_PATH, 'a') as f:
+            f.write(server_config_addition)
+
+        # Save used IP
+        used_ips = load_used_ips()
+        used_ips[client_name] = client_ip
+        
+        os.makedirs(os.path.dirname(USED_IPS_FILE), exist_ok=True)
+        with open(USED_IPS_FILE, 'w') as f:
+            json.dump(used_ips, f)
+
+        # Reload WireGuard configuration
+        reload_wireguard()
+
+        response_data = {
+            "config": client_config,
+            "ip": client_ip
+        }
+        
+        logger.info(f"Successfully generated config for {client_name}")
+        return jsonify(response_data)
+
+    except Exception as e:
+        logger.error(f"Error generating config: {str(e)}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/list_clients', methods=['GET'])
+def list_clients():
+    try:
+        if request.headers.get('Authorization') not in ALLOWED_KEYS:
+            return jsonify({"error": "Unauthorized"}), 401
+        
+        used_ips = load_used_ips()
+        return jsonify(used_ips)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/health', methods=['GET'])
+def health_check():
+    try:
+        # Check if WireGuard is running
+        subprocess.run(["wg", "show"], check=True)
+        return jsonify({"status": "healthy"})
+    except Exception as e:
+        return jsonify({"status": "unhealthy", "error": str(e)}), 500
+
+if __name__ == '__main__':
+    # Ensure the USED_IPS_FILE directory exists
+    os.makedirs(os.path.dirname(USED_IPS_FILE), exist_ok=True)
+    
+    # Initialize used_ips.json if it doesn't exist
+    if not os.path.exists(USED_IPS_FILE):
+        with open(USED_IPS_FILE, 'w') as f:
+            json.dump({}, f)
+    
+    app.run(host='0.0.0.0', port={{ wg_service_port }}, debug=True)

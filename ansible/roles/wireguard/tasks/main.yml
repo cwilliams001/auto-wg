@@ -1,0 +1,52 @@
+---
+- name: Install WireGuard
+  apt:
+    name:
+      - wireguard
+    state: present
+
+- name: Generate WireGuard private key
+  shell: wg genkey
+  register: privatekey
+  args:
+    creates: /etc/wireguard/private.key
+
+- name: Store WireGuard private key
+  copy:
+    content: "{{ privatekey.stdout }}"
+    dest: /etc/wireguard/private.key
+    mode: '0600'
+
+- name: Generate WireGuard public key
+  shell: echo "{{ privatekey.stdout }}" | wg pubkey
+  register: wg_public_key
+
+- name: Set fact for Wireguard public key
+  set_fact:
+    wg_public_key: "{{ wg_public_key.stdout }}"
+
+- name: Debug variables
+  debug:
+    msg: 
+      - "Public Key: {{ wg_public_key }}"
+      - "Host: {{ ansible_host }}"
+      - "Network: {{ wireguard_network }}"
+      - "Port: {{ wireguard_port }}"
+
+- name: Create WireGuard configuration directory
+  file:
+    path: /etc/wireguard
+    state: directory
+    mode: '0700'
+
+- name: Create WireGuard configuration
+  template:
+    src: wg0.conf.j2
+    dest: /etc/wireguard/wg0.conf
+    mode: '0600'
+
+- name: Enable WireGuard service
+  systemd:
+    name: wg-quick@wg0
+    enabled: yes
+    state: started

@@ -1,0 +1,38 @@
+---
+- name: Install Python packages
+  pip:
+    name:
+      - flask
+      - requests
+    state: present
+
+- name: Create service directory
+  file:
+    path: /opt/wg_service
+    state: directory
+    mode: '0755'
+
+- name: Copy WireGuard service script
+  template:
+    src: wg_server.py.j2
+    dest: "{{ wg_service_dir }}/wg_server.py"
+    mode: '0755'
+
+- name: Create used IPs file
+  file:
+    path: /opt/wg_service/used_ips.json
+    state: touch
+    mode: '0644'
+
+- name: Create systemd service file
+  template:
+    src: wg_service.service.j2
+    dest: /etc/systemd/system/wg_service.service
+    mode: '0644'
+
+- name: Start and enable WG service
+  systemd:
+    name: wg_service
+    state: started
+    enabled: yes
+    daemon_reload: yes
