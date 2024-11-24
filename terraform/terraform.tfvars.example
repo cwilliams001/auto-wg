@@ -1,2 +1,5 @@
 vultr_api_key = "your-api-key-here"
 ssh_key_id    = "your-ssh-key-id
+
+## run the following command to get the ssh key id: 
+##curl -H 'Authorization: Bearer Vultr_API_KEY' https://api.vultr.com/v2/ssh-keys
