@@ -4,8 +4,8 @@ import os
 import sys
 import platform
 
-SERVER_URL = "{{ wireguard_server_url }}"
-AUTH_KEY = "{{ auth_keys[0] }}"
+SERVER_URL = "${wireguard_server_url}"
+AUTH_KEY = "${auth_key}"
 WG_CONFIG_PATH = "/etc/wireguard/wg0.conf"
 
 def check_dependencies():
