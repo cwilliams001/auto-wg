@@ -30,6 +30,14 @@
     dest: /etc/systemd/system/wg_service.service
     mode: '0644'
 
+- name: Generate client setup script
+  template:
+    src: client_setup.py.j2
+    dest: "{{ wg_service_dir }}/client_setup.py"
+    mode: '0755'
+  vars:
+    wireguard_server_url: "http://{{ ansible_host }}:{{ wg_service_port }}" # Server URL
+
 - name: Start and enable WG service
   systemd:
     name: wg_service
