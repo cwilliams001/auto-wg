@@ -9,3 +9,9 @@ variable "ssh_key_id" {
   type        = string
   sensitive   = true
 }
+
+variable "wireguard_auth_key" {
+  description = "Authentication key for WireGuard clients"
+  type        = string
+  sensitive   = true
+}

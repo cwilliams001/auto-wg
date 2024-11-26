@@ -38,6 +38,7 @@ resource "vultr_instance" "test_wireguard" {
 resource "local_file" "ansible_inventory" {
   content  = templatefile("${path.module}/../ansible/inventory/inventory.ini.tpl", {
     wireguard_ip = vultr_instance.test_wireguard.main_ip
+    auth_key     = var.wireguard_auth_key
   })
   filename = "${path.module}/../ansible/inventory/hosts"
 }
@@ -73,7 +74,7 @@ resource "local_file" "client_setup_script" {
 
   content = templatefile("${path.module}/../ansible/roles/wg_service/templates/client_setup.py.j2", {
     wireguard_server_url = "http://${vultr_instance.test_wireguard.main_ip}:5000/generate_config",
-    auth_key             = "some-random-key-2024"  # Replace with actual auth key
+    auth_key             = var.wireguard_auth_key
   })
 
   filename = "${path.module}/../client/client_setup.py"

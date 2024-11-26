@@ -9,4 +9,4 @@ wireguard_dns_servers:
 wg_service_dir: /opt/wg_service
 wg_service_port: 5000
 auth_keys:
-  - "some-random-key-2024"
+  - "{{ auth_key }}"
