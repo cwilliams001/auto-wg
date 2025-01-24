@@ -15,3 +15,20 @@ variable "wireguard_auth_key" {
   type        = string
   sensitive   = true
 }
+
+variable "cloudflare_api_token" {
+  description = "Cloudflare API token"
+  type        = string
+  sensitive   = true
+}
+
+variable "cloudflare_zone_id" {
+  description = "Cloudflare Zone ID for echo1.dev"
+  type        = string
+}
+
+variable "domain_name" {
+  description = "Domain name for WireGuard service"
+  type        = string
+  default     = "wg.echo1.dev"
+}

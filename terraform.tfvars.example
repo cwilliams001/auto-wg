@@ -1,0 +1,8 @@
+vultr_api_key         = "your-vultr-api-key"
+ssh_key_id           = "your-ssh-key-id"
+wireguard_auth_key   = "your-generated-auth-key"
+cloudflare_api_token = "your-cloudflare-api-token"
+cloudflare_zone_id   = "your-cloudflare-zone-id"
+domain_name          = "wg.yourdomain.com"  
+## run the following command to get the ssh key id: 
+##curl -H 'Authorization: Bearer Vultr_API_KEY' https://api.vultr.com/v2/ssh-keys

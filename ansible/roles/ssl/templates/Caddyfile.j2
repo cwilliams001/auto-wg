@@ -1,0 +1,5 @@
+# ansible/roles/ssl/templates/Caddyfile.j2
+{{ domain_name }} {
+    reverse_proxy localhost:5000
+    tls {{ ssl_email }}
+}

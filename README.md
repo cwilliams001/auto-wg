@@ -19,13 +19,17 @@ A self-hosted WireGuard VPN management system that automates server deployment a
 - **One-Command Deployment**: Fully automated server provisioning using Terraform
 - **Zero-Config Client Setup**: Simple client onboarding script
 - **Centralized Management**: REST API for configuration and client management
-- **Secure by Default**: Authentication-based access control
+- **Secure by Default**: HTTPS and authentication-based access control
 - **Multi-Platform Support**: Works on Linux-based systems
+- **Automated SSL**: Automatic HTTPS certificates via Caddy
+- **DNS Management**: Automated DNS configuration with Cloudflare
 
 ## 🔧 Prerequisites
 
 ### Server Requirements
 - Vultr account with API key
+- Cloudflare account with API token
+- Domain name managed by Cloudflare
 - Ubuntu 22.04 or later
 - Python 3.10+
 
@@ -52,19 +56,33 @@ cp terraform/terraform.tfvars.example terraform/terraform.tfvars
 2. Configure credentials:
 ```bash
 # Edit terraform/terraform.tfvars with your:
-# - Vultr API key
-# - SSH key ID
-# - WireGuard authentication key
+vultr_api_key         = "your-vultr-api-key"
+ssh_key_id           = "your-ssh-key-id"
+wireguard_auth_key   = "your-generated-auth-key"
+cloudflare_api_token = "your-cloudflare-api-token"
+cloudflare_zone_id   = "your-cloudflare-zone-id"
+domain_name          = "wg.yourdomain.com"
 ```
 
-3. Deploy:
+3. Configure Ansible variables:
+```bash
+# Edit ansible/vars/main.yml with:
+wireguard_network: "10.0.0.0/24"
+wireguard_address: "10.0.0.1/24"
+wireguard_port: 51820
+wg_service_port: 5000
+domain_name: "wg.yourdomain.com"
+ssl_email: "your-email@example.com"
+```
+
+4. Deploy:
 ```bash
 cd terraform
 terraform init
 terraform apply
 ```
 
-4. Set up a client:
+5. Set up a client:
 ```bash
 sudo python3 client/client_setup.py
 ```
@@ -78,11 +96,25 @@ sudo python3 client/client_setup.py
 openssl rand -base64 32
 ```
 
-2. **Configure Variables**:
-   - Add the generated key to `terraform/terraform.tfvars`
-   - Set your Vultr API key and SSH key ID
+2. **Run the following command to get the ssh key id**: 
+```bash
+curl -H 'Authorization: Bearer Vultr_API_KEY' https://api.vultr.com/v2/ssh-keys
+```
 
-3. **Deploy Infrastructure**:
+3. **Get Cloudflare Zone ID**:
+```bash
+curl -X GET "https://api.cloudflare.com/client/v4/zones" \
+     -H "Authorization: Bearer YOUR_API_TOKEN" \
+     -H "Content-Type: application/json"
+```
+
+4. **Configure Variables**:
+- Add the generated key to `terraform/terraform.tfvars`
+- Set your Vultr API key and SSH key ID
+- Configure Cloudflare credentials
+- Set your domain name
+
+5. **Deploy Infrastructure**:
 ```bash
 cd terraform
 terraform init
@@ -94,7 +126,7 @@ terraform apply
 
 The client setup script handles:
 - WireGuard package installation
-- Configuration retrieval
+- Configuration retrieval via HTTPS
 - Interface setup
 - Service activation
 
@@ -109,8 +141,11 @@ sudo python3 client_setup.py
 Edit `ansible/vars/main.yml`:
 ```yaml
 wireguard_network: "10.0.0.0/24"
+wireguard_address: "10.0.0.1/24"
 wireguard_port: 51820
 wg_service_port: 5000
+domain_name: "wg.yourdomain.com"
+ssl_email: "your-email@example.com"
 ```
 
 ### Network Configuration
@@ -124,12 +159,12 @@ wg_service_port: 5000
 
 **List Connected Clients**:
 ```bash
-curl -H "Authorization: your-auth-key" http://<SERVER_IP>:5000/list_clients
+curl -H "Authorization: your-auth-key" https://wg.yourdomain.com/list_clients
 ```
 
 **Check Server Health**:
 ```bash
-curl http://<SERVER_IP>:5000/health
+curl https://wg.yourdomain.com/health
 ```
 
 ### API Endpoints
@@ -148,11 +183,14 @@ curl http://<SERVER_IP>:5000/health
 3. Enable UFW firewall
 4. Regularly update system packages
 5. Monitor server logs
+6. Use HTTPS for API communication
+7. Keep Cloudflare API tokens secure
 
 ### Firewall Configuration
 The following ports must be open:
 - 51820/udp (WireGuard)
-- 5000/tcp (Management API)
+- 80/tcp (HTTP - Caddy ACME challenges)
+- 443/tcp (HTTPS - API endpoint)
 
 ## 🔍 Troubleshooting
 
@@ -164,7 +202,11 @@ The following ports must be open:
 sudo wg show
 sudo systemctl status wg-quick@wg0
 
-# View service logs
+# Check Caddy status
+sudo systemctl status caddy
+sudo journalctl -u caddy
+
+# View WireGuard service logs
 journalctl -u wg_service
 ```
 
@@ -172,6 +214,8 @@ journalctl -u wg_service
 - Verify authentication key
 - Check IP assignments
 - Ensure ports are open
+- Verify DNS resolution
+- Check Cloudflare SSL/TLS settings (should be set to "Full")
 
 ## 🤝 Contributing
 
@@ -191,3 +235,5 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - [Flask](https://flask.palletsprojects.com/)
 - [Terraform](https://www.terraform.io/)
 - [Ansible](https://www.ansible.com/)
+- [Caddy](https://caddyserver.com/)
+- [Cloudflare](https://www.cloudflare.com/)

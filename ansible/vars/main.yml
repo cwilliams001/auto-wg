@@ -10,3 +10,6 @@ wg_service_dir: /opt/wg_service
 wg_service_port: 5000
 auth_keys:
   - "{{ auth_key }}"
+
+domain_name: "wg.echo1.dev"
+ssl_email: "williamsct1@gmail.com"

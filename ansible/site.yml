@@ -8,6 +8,7 @@
     - common
     - wireguard
     - wg_service
+    - ssl
 
   post_tasks:
     - name: Enable IP forwarding
@@ -29,3 +30,21 @@
         rule: allow
         port: "{{ wg_service_port }}"
         proto: tcp
+    
+    - name: Allow Caddy HTTP port
+      ufw:
+        rule: allow
+        port: "80"
+        proto: tcp
+    
+    - name: Allow Caddy HTTPS port
+      ufw:
+        rule: allow
+        port: "443"
+        proto: tcp
+    
+    - name: Restart Caddy
+      systemd:
+        name: caddy
+        state: restarted
+        enabled: yes
