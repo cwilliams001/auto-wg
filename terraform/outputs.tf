@@ -1,3 +1,3 @@
 output "wireguard_ip" {
-  value = vultr_instance.test_wireguard.main_ip
+  value = vultr_instance.auto-wg.main_ip
 }

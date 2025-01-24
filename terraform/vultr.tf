@@ -34,18 +34,18 @@ provider "cloudflare" {
 }
 
 # Define a Vultr instance
-resource "vultr_instance" "test_wireguard" {
+resource "vultr_instance" "auto-wg" {
   plan        = "vc2-1c-1gb"
   region      = "ewr"
   os_id       = "1743"
-  label       = "test_wireguard"
+  label       = "auto-wg"
   ssh_key_ids = [var.ssh_key_id]
 }
 
 
 resource "local_file" "ansible_inventory" {
   content = templatefile("${path.module}/../ansible/inventory/inventory.ini.tpl", {
-    wireguard_ip = vultr_instance.test_wireguard.main_ip
+    wireguard_ip = vultr_instance.auto-wg.main_ip
     auth_key     = var.wireguard_auth_key
   })
   filename = "${path.module}/../ansible/inventory/hosts"
@@ -53,7 +53,7 @@ resource "local_file" "ansible_inventory" {
 
 # Resource to wait for the instance to be fully ready after creation
 resource "time_sleep" "wait_60_seconds" {
-  depends_on      = [vultr_instance.test_wireguard]
+  depends_on      = [vultr_instance.auto-wg]
   create_duration = "60s"
 }
 
@@ -72,7 +72,7 @@ resource "null_resource" "ansible_provisioner" {
   }
 
   triggers = {
-    instance_ip = vultr_instance.test_wireguard.main_ip
+    instance_ip = vultr_instance.auto-wg.main_ip
   }
 }
 
