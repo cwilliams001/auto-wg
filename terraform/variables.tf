@@ -23,12 +23,12 @@ variable "cloudflare_api_token" {
 }
 
 variable "cloudflare_zone_id" {
-  description = "Cloudflare Zone ID for echo1.dev"
+  description = "Cloudflare Zone ID for yourdomain.com"
   type        = string
 }
 
 variable "domain_name" {
   description = "Domain name for WireGuard service"
   type        = string
-  default     = "wg.echo1.dev"
+  default     = "wg.yourdomain.com"
 }
