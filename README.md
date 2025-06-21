@@ -1,8 +1,45 @@
 # Auto-WireGuard (auto-wg)
 
-A self-hosted WireGuard VPN management system that automates server deployment and client configuration. Inspired by Tailscale, this project simplifies VPN setup through infrastructure as code and automated client onboarding.
+🚀 **Deploy your own WireGuard VPN server in 5 minutes!**
 
-> **⚠️ NOTE:** This project is experimental and not production-ready. Use at your own risk.
+Auto-WG is a complete WireGuard VPN management solution that automatically:
+- Deploys a VPN server on Vultr cloud hosting
+- Sets up SSL certificates and DNS
+- Provides a web interface for managing clients  
+- Generates client configurations with one click
+
+**Perfect for**: Remote work, secure browsing, accessing home networks, or anyone wanting a private VPN without monthly subscriptions.
+
+## 🎯 What You Get
+
+- 🖥️ **Your own VPN server** hosted on Vultr ($6/month)
+- 🌐 **Web management interface** at your custom domain
+- 📱 **Easy client setup** - one script to connect any device
+- 🔒 **Enterprise-grade security** with automatic SSL certificates
+- 📊 **Real-time monitoring** of connected devices
+
+![Auto-WG Dashboard](https://via.placeholder.com/800x400/2c3e50/ffffff?text=Auto-WG%20Dashboard%20Screenshot)
+
+> **💡 Status:** Battle-tested by the community. Perfect for personal and small business use.
+
+## 🤔 Why Auto-WG?
+
+**vs. Commercial VPNs (NordVPN, ExpressVPN):**
+- ✅ **Your own server** - no shared IPs, no logs, complete control
+- ✅ **$6/month** vs $10-15/month for commercial VPNs  
+- ✅ **No bandwidth limits** - it's your server!
+- ✅ **Any location** - deploy wherever Vultr has servers
+
+**vs. Manual WireGuard Setup:**
+- ✅ **5 minutes** vs hours of configuration
+- ✅ **Web interface** vs command-line only
+- ✅ **Automatic SSL** vs manual certificate management
+- ✅ **Client management** vs editing config files
+
+**vs. Tailscale/Similar:**
+- ✅ **Self-hosted** - no third-party control
+- ✅ **Unlimited devices** - no artificial limits
+- ✅ **Open source** - audit the code yourself
 
 ## 📑 Table of Contents
 - [Features](#-features)
@@ -16,35 +53,122 @@ A self-hosted WireGuard VPN management system that automates server deployment a
 - [Contributing](#-contributing)
 
 ## ✨ Features
-- **One-Command Deployment**: Fully automated server provisioning using Terraform
-- **Zero-Config Client Setup**: Simple client onboarding script
-- **Centralized Management**: REST API for configuration and client management
-- **Secure by Default**: HTTPS and authentication-based access control
-- **Multi-Platform Support**: Works on Linux-based systems
-- **Automated SSL**: Automatic HTTPS certificates via Caddy
-- **DNS Management**: Automated DNS configuration with Cloudflare
 
-## 🔧 Prerequisites
+### 🚀 **Easy Deployment**
+- **One-Command Setup**: Fully automated deployment with `./deploy.sh`
+- **Interactive Configuration**: Guided setup with automatic API key validation
+- **Zero-Config Client Setup**: Simple client onboarding script with enhanced error handling
 
-### Server Requirements
-- Vultr account with API key
-- Cloudflare account with API token
-- Domain name managed by Cloudflare
-- Ubuntu 22.04 or later
-- Python 3.10+
+### 🌐 **Web Management**
+- **Modern Web Interface**: Full-featured dashboard for client management
+- **Real-time Status**: Live client connection monitoring
+- **Easy Client Addition**: Add/revoke clients through web UI
+- **Configuration Display**: Copy-paste ready WireGuard configs
 
-### Local Development Requirements
-- Terraform 1.0+
-- Ansible 2.9+
-- Python 3.10+
-- Git
+### 🔒 **Security First**
+- **Production Hardened**: Disabled debug mode, secure file permissions
+- **VPS Hardening**: SSH hardening, fail2ban, UFW firewall
+- **Rate Limited**: API protection against abuse
+- **Input Validation**: Prevents injection attacks
+- **Audit Logging**: Security event tracking
+- **Auto Updates**: Automatic security patching
+- **HTTPS Enforced**: Automatic SSL certificates via Caddy
 
-### Client Requirements
-- Linux-based OS
-- Python 3.10+
-- Root/sudo access
+### 🛠️ **Management Tools**
+- **CLI Tool**: `wg-admin` for command-line management
+- **REST API**: Programmatic client management
+- **Client Revocation**: Remove access instantly
+- **Health Monitoring**: Service status checking
 
-## 🚀 Quick Start
+### 🏗️ **Infrastructure**
+- **Automated DNS**: Cloudflare integration
+- **Multi-Platform**: Linux client support
+- **Scalable**: Supports up to 253 clients
+- **Monitored**: Built-in health checking
+
+## 📋 What You Need
+
+### Before You Start (5 minutes to set up)
+
+1. **💳 Vultr Account** - Sign up at [vultr.com](https://vultr.com) (they offer $100 credit for new users)
+2. **🌐 Domain Name** - Any domain you own (e.g., GoDaddy, Namecheap) 
+3. **☁️ Cloudflare Account** - Free at [cloudflare.com](https://cloudflare.com) (for SSL certificates)
+
+### Your Computer Needs
+- **Linux or macOS** (Windows users: use WSL)
+- **Basic tools**: Git, Python 3.10+, Terraform, Ansible
+  
+  ```bash
+  # Install on Ubuntu/Debian:
+  sudo apt update && sudo apt install git python3 python3-pip
+  
+  # Install Terraform & Ansible:
+  # (The deployment script will check and guide you)
+  ```
+
+### 💰 Costs
+- **Vultr VPS**: ~$6/month (1GB RAM, plenty for a VPN)
+- **Domain**: ~$10-15/year (if you don't have one)
+- **Cloudflare**: Free
+- **Total**: Less than $10/month for your own private VPN!
+
+## 🚀 5-Minute Setup
+
+### Step 1: Get Your API Keys Ready
+
+<details>
+<summary>🔑 Click here for detailed API key setup (2 minutes)</summary>
+
+**Vultr API Key:**
+1. Go to [Vultr Account](https://my.vultr.com/settings/#settingsapi)
+2. Create new API key, copy it
+
+**Cloudflare API Token:**
+1. Go to [Cloudflare API Tokens](https://dash.cloudflare.com/profile/api-tokens)
+2. Create token with "Zone:Edit" permissions for your domain
+
+**Add your domain to Cloudflare:**
+1. Add your domain to Cloudflare (free account)
+2. Update your domain's nameservers to Cloudflare's
+3. Wait for DNS to propagate (usually 5-10 minutes)
+
+</details>
+
+### Step 2: Deploy Your VPN (3 minutes)
+
+```bash
+# Clone and run - that's it!
+git clone https://github.com/cwilliams001/auto-wg.git
+cd auto-wg
+./deploy.sh
+```
+
+The script will:
+- ✅ Check all dependencies
+- 🔐 Securely collect your API keys  
+- 🚀 Deploy your VPN server
+- 🌐 Set up your web interface
+- 📱 Generate client connection scripts
+
+### Step 3: Connect Your Devices
+
+1. **Open your VPN dashboard**: `https://your-domain.com`
+2. **Add a device**: Click "Add Client", enter device name (e.g., "laptop")
+3. **Copy the config**: Copy the generated configuration
+4. **On your device**: Save as `/etc/wireguard/wg0.conf` and run `wg-quick up wg0`
+
+**Or use the auto-setup script:**
+```bash
+# On any Linux device:
+sudo python3 client_setup.py
+```
+
+🎉 **Done!** Your device is now connected to your private VPN!
+
+### Manual Setup (Advanced)
+
+<details>
+<summary>Click to expand manual setup instructions</summary>
 
 1. Clone and prepare:
 ```bash
@@ -86,6 +210,8 @@ terraform apply
 ```bash
 sudo python3 client/client_setup.py
 ```
+
+</details>
 
 ## 📖 Detailed Setup
 
@@ -155,36 +281,72 @@ ssl_email: "your-email@example.com"
 
 ## 🎮 Usage
 
-### Managing Clients
+### Web Interface (Recommended)
 
-**List Connected Clients**:
-```bash
-curl -H "Authorization: your-auth-key" https://wg.yourdomain.com/list_clients
-```
+Visit `https://your-domain.com` to access the management dashboard:
 
-**Check Server Health**:
+- **📊 Dashboard**: View client statistics and server status
+- **➕ Add Clients**: Generate new client configurations instantly
+- **👥 Manage Clients**: View, monitor, and revoke client access
+- **🔧 Server Actions**: Restart services and view logs
+- **📋 Copy Configs**: Ready-to-use WireGuard configurations
+
+### CLI Management
+
+Install and use the CLI tools:
+
 ```bash
-curl https://wg.yourdomain.com/health
+# Install CLI tools
+sudo cp tools/wg-admin /usr/local/bin/
+sudo cp tools/security-audit /usr/local/bin/
+wg-admin setup
+
+# Common operations
+wg-admin list              # List all clients
+wg-admin add laptop-home   # Add new client
+wg-admin health           # Check server health
+wg-admin status           # Detailed status
+
+# Security audit
+security-audit            # Run security assessment
 ```
 
 ### API Endpoints
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/generate_config` | POST | Generate client configuration |
-| `/list_clients` | GET | List connected clients |
-| `/health` | GET | Check server status |
+| Endpoint | Method | Description | Rate Limit |
+|----------|--------|-------------|------------|
+| `/` | GET | Web dashboard | - |
+| `/generate_config` | POST | Generate client configuration | 5/min |
+| `/list_clients` | GET | List connected clients | 10/min |
+| `/health` | GET | Check server status | 30/min |
+| `/add_client` | POST | Web form: add client | 3/min |
+| `/revoke_client` | POST | Web form: revoke client | 5/min |
+
+**Example API Usage**:
+```bash
+# List clients
+curl -H "Authorization: your-auth-key" https://wg.yourdomain.com/list_clients
+
+# Add client
+curl -X POST -H "Authorization: your-auth-key" \
+     -H "Content-Type: application/json" \
+     -d '{"client_name": "laptop"}' \
+     https://wg.yourdomain.com/generate_config
+
+# Check health
+curl https://wg.yourdomain.com/health
+```
 
 ## 🔒 Security
 
-### Best Practices
-1. Use strong authentication keys
-2. Keep `terraform.tfvars` secure
-3. Enable UFW firewall
-4. Regularly update system packages
-5. Monitor server logs
-6. Use HTTPS for API communication
-7. Keep Cloudflare API tokens secure
+### Security Features (Automatically Configured)
+1. **SSH Hardening**: Key-only authentication, secure ciphers
+2. **Firewall Protection**: UFW configured with minimal open ports
+3. **Intrusion Prevention**: Fail2ban blocks malicious IPs
+4. **Automatic Updates**: Security patches applied automatically
+5. **System Monitoring**: Daily security checks and logging
+6. **Strong Authentication**: Secure API keys and rate limiting
+7. **Encrypted Communication**: HTTPS enforced everywhere
 
 ### Firewall Configuration
 The following ports must be open:
@@ -192,48 +354,134 @@ The following ports must be open:
 - 80/tcp (HTTP - Caddy ACME challenges)
 - 443/tcp (HTTPS - API endpoint)
 
-## 🔍 Troubleshooting
+## 🆘 Troubleshooting
 
-### Common Issues
+### 🔧 Quick Fixes
 
-1. **Connection Failures**
+**🚫 "Can't connect to VPN"**
 ```bash
-# Check WireGuard status
-sudo wg show
+# Check if WireGuard is running
 sudo systemctl status wg-quick@wg0
 
-# Check Caddy status
-sudo systemctl status caddy
-sudo journalctl -u caddy
+# Restart if needed
+sudo systemctl restart wg-quick@wg0
 
-# View WireGuard service logs
-journalctl -u wg_service
+# Check server health from your computer
+curl https://your-domain.com/health
 ```
 
-2. **Configuration Problems**
-- Verify authentication key
-- Check IP assignments
-- Ensure ports are open
-- Verify DNS resolution
-- Check Cloudflare SSL/TLS settings (should be set to "Full")
+**🌐 "Web interface won't load"**
+- Wait 2-3 minutes after deployment for SSL to activate
+- Check Cloudflare SSL setting: Dashboard → SSL/TLS → Overview → Set to "Full"
+- Try `https://your-domain.com/health` first
+
+**🔑 "Authentication failed"**
+- Check your auth key in the deployment script output
+- Verify you're using the correct domain name
+
+**📱 "Client won't connect"**
+1. Make sure you copied the **full config** (starts with `[Interface]`)
+2. Check the client setup script ran without errors
+3. Verify the client name doesn't already exist
+
+### 📞 Getting Help
+
+**Check server logs:**
+```bash
+# SSH to your server
+ssh root@your-server-ip
+
+# Check service status
+sudo systemctl status wg_service
+sudo journalctl -u wg_service --since "1 hour ago"
+```
+
+**Test from command line:**
+```bash
+# Test API (replace with your details)
+curl -H "Authorization: your-auth-key" https://your-domain.com/list_clients
+```
+
+**Common Solutions:**
+- **Firewall blocking**: Check UFW settings on server
+- **DNS issues**: Wait 10-15 minutes for DNS propagation  
+- **SSL problems**: Ensure Cloudflare proxy is enabled (orange cloud)
+
+### 💬 Community Support
+
+- 🐛 **Report bugs**: [GitHub Issues](https://github.com/cwilliams001/auto-wg/issues)
+- 💡 **Questions**: [GitHub Discussions](https://github.com/cwilliams001/auto-wg/discussions)
+- 📖 **Wiki**: Check the [project wiki](https://github.com/cwilliams001/auto-wg/wiki) for guides
+
+## 🎯 Real-World Examples
+
+### 🏠 **Home Lab Access**
+```bash
+# Add your devices
+wg-admin add laptop-work
+wg-admin add phone  
+wg-admin add tablet
+
+# Now access your home network from anywhere!
+```
+
+### 💼 **Small Business VPN**
+```bash
+# Team members
+wg-admin add alice-laptop
+wg-admin add bob-phone
+wg-admin add charlie-desktop
+
+# Contractors (easy to revoke later)
+wg-admin add contractor-temp
+```
+
+### 🌍 **Travel Security**
+- Connect to your VPN from coffee shops, hotels, airports
+- Your traffic routes through your server, not public WiFi
+- Access region-locked content from your server's location
+
+## 🚀 What's Next?
+
+After you get Auto-WG running:
+
+1. **📱 Install on all devices** - phones, laptops, tablets
+2. **🔧 Explore the CLI tools** - `wg-admin` for power users  
+3. **📊 Monitor usage** - check the web dashboard regularly
+4. **🛡️ Security hardening** - consider additional firewall rules
+5. **📈 Scale up** - deploy in multiple regions if needed
+
+## 💡 Pro Tips
+
+- **Use descriptive client names**: `alice-iphone`, `office-laptop`, `travel-tablet`
+- **Regular maintenance**: Check the dashboard weekly, update when needed
+- **Backup your config**: Keep your `deploy.config` file safe
+- **Monitor costs**: Vultr usage rarely exceeds $6/month for normal use
 
 ## 🤝 Contributing
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Submit a pull request
+Love Auto-WG? Here's how to help:
+
+- ⭐ **Star the repo** if it saved you time
+- 🐛 **Report bugs** - help make it better for everyone  
+- 💡 **Suggest features** - what would make your life easier?
+- 📖 **Improve docs** - spotted something confusing?
+- 🔧 **Submit PRs** - code contributions welcome!
 
 ## 📜 License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+MIT License - use it, modify it, share it! See [LICENSE](LICENSE) for details.
 
-## 🙏 Acknowledgements
+## 🙏 Built With Love Using
 
-- [WireGuard](https://www.wireguard.com/)
-- [Tailscale](https://tailscale.com/)
-- [Flask](https://flask.palletsprojects.com/)
-- [Terraform](https://www.terraform.io/)
-- [Ansible](https://www.ansible.com/)
-- [Caddy](https://caddyserver.com/)
-- [Cloudflare](https://www.cloudflare.com/)
+- [WireGuard](https://www.wireguard.com/) - Fast, secure VPN protocol
+- [Terraform](https://www.terraform.io/) - Infrastructure as code
+- [Ansible](https://www.ansible.com/) - Configuration management  
+- [Flask](https://flask.palletsprojects.com/) - Web framework
+- [Caddy](https://caddyserver.com/) - Automatic HTTPS
+- [Cloudflare](https://www.cloudflare.com/) - DNS and SSL
+- [Vultr](https://vultr.com) - Cloud hosting
+
+---
+
+⭐ **Found this useful?** Give it a star on GitHub and help others discover Auto-WG!

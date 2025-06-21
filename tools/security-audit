@@ -1,0 +1,312 @@
+#!/usr/bin/env python3
+
+"""
+Auto-WG Security Audit Tool
+Checks the security posture of your deployed Auto-WG server
+"""
+
+import argparse
+import subprocess
+import sys
+import json
+import requests
+from urllib.parse import urljoin
+import configparser
+from pathlib import Path
+
+class SecurityAuditor:
+    def __init__(self, server_url=None, auth_key=None):
+        self.server_url = server_url
+        self.auth_key = auth_key
+        self.issues = []
+        self.warnings = []
+        self.good = []
+        
+    def log_issue(self, message):
+        """Log a security issue"""
+        self.issues.append(message)
+        print(f"❌ ISSUE: {message}")
+    
+    def log_warning(self, message):
+        """Log a security warning"""
+        self.warnings.append(message)
+        print(f"⚠️  WARNING: {message}")
+    
+    def log_good(self, message):
+        """Log a good security practice"""
+        self.good.append(message)
+        print(f"✅ GOOD: {message}")
+    
+    def check_server_connectivity(self):
+        """Check if we can connect to the server"""
+        print("\n🔍 Checking server connectivity...")
+        
+        if not self.server_url:
+            self.log_issue("No server URL provided")
+            return False
+        
+        try:
+            response = requests.get(urljoin(self.server_url, '/health'), timeout=10)
+            if response.status_code == 200:
+                self.log_good("Server is responding to health checks")
+                return True
+            else:
+                self.log_warning(f"Server health check returned {response.status_code}")
+                return False
+        except requests.exceptions.SSLError:
+            self.log_issue("SSL certificate verification failed")
+            return False
+        except requests.exceptions.ConnectionError:
+            self.log_issue("Cannot connect to server")
+            return False
+        except requests.exceptions.Timeout:
+            self.log_warning("Server response is slow (>10s)")
+            return False
+        except Exception as e:
+            self.log_issue(f"Connection error: {e}")
+            return False
+    
+    def check_ssl_configuration(self):
+        """Check SSL/TLS configuration"""
+        print("\n🔒 Checking SSL/TLS configuration...")
+        
+        if not self.server_url or not self.server_url.startswith('https://'):
+            self.log_issue("Server URL should use HTTPS")
+            return
+        
+        try:
+            # Test SSL connection
+            response = requests.get(self.server_url, timeout=10)
+            self.log_good("HTTPS connection successful")
+            
+            # Check for security headers
+            headers = response.headers
+            security_headers = {
+                'Strict-Transport-Security': 'HSTS header enforces HTTPS',
+                'X-Content-Type-Options': 'Prevents MIME type sniffing',
+                'X-Frame-Options': 'Prevents clickjacking attacks',
+                'X-XSS-Protection': 'Enables XSS filtering'
+            }
+            
+            for header, description in security_headers.items():
+                if header in headers:
+                    self.log_good(f"Security header present: {header}")
+                else:
+                    self.log_warning(f"Missing security header: {header} ({description})")
+            
+        except Exception as e:
+            self.log_issue(f"SSL check failed: {e}")
+    
+    def check_authentication(self):
+        """Check authentication security"""
+        print("\n🔑 Checking authentication...")
+        
+        if not self.auth_key:
+            self.log_warning("No authentication key provided for testing")
+            return
+        
+        # Test with correct auth
+        try:
+            headers = {'Authorization': self.auth_key}
+            response = requests.get(urljoin(self.server_url, '/list_clients'), 
+                                  headers=headers, timeout=10)
+            if response.status_code == 200:
+                self.log_good("Authentication working correctly")
+            elif response.status_code == 401:
+                self.log_issue("Authentication failed - check your auth key")
+            else:
+                self.log_warning(f"Unexpected auth response: {response.status_code}")
+        except Exception as e:
+            self.log_warning(f"Auth test failed: {e}")
+        
+        # Test without auth (should fail)
+        try:
+            response = requests.get(urljoin(self.server_url, '/list_clients'), timeout=10)
+            if response.status_code == 401:
+                self.log_good("Unauthenticated requests properly rejected")
+            else:
+                self.log_issue("Server accepts requests without authentication!")
+        except Exception as e:
+            self.log_warning(f"Unauth test failed: {e}")
+    
+    def check_rate_limiting(self):
+        """Check if rate limiting is working"""
+        print("\n🚦 Checking rate limiting...")
+        
+        if not self.server_url:
+            return
+        
+        try:
+            # Make rapid requests to test rate limiting
+            responses = []
+            for i in range(15):  # Should hit rate limit
+                response = requests.get(urljoin(self.server_url, '/health'), timeout=5)
+                responses.append(response.status_code)
+            
+            # Check if we got rate limited
+            if 429 in responses:
+                self.log_good("Rate limiting is active")
+            else:
+                self.log_warning("Rate limiting may not be configured")
+        
+        except Exception as e:
+            self.log_warning(f"Rate limit test failed: {e}")
+    
+    def check_exposed_endpoints(self):
+        """Check for exposed sensitive endpoints"""
+        print("\n🌐 Checking for exposed endpoints...")
+        
+        if not self.server_url:
+            return
+        
+        # Test common sensitive paths
+        sensitive_paths = [
+            '/.env',
+            '/config',
+            '/admin',
+            '/.git',
+            '/phpmyadmin',
+            '/wp-admin',
+            '/debug',
+            '/test'
+        ]
+        
+        for path in sensitive_paths:
+            try:
+                response = requests.get(urljoin(self.server_url, path), timeout=5)
+                if response.status_code == 200:
+                    self.log_issue(f"Sensitive endpoint exposed: {path}")
+                elif response.status_code == 404:
+                    self.log_good(f"Sensitive endpoint properly hidden: {path}")
+            except:
+                pass  # Ignore connection errors for this test
+    
+    def check_server_info_disclosure(self):
+        """Check for information disclosure"""
+        print("\n🔍 Checking for information disclosure...")
+        
+        if not self.server_url:
+            return
+        
+        try:
+            response = requests.get(self.server_url, timeout=10)
+            headers = response.headers
+            
+            # Check for server version disclosure
+            server_header = headers.get('Server', '')
+            if 'nginx' in server_header.lower() and '/' in server_header:
+                self.log_warning("Server version disclosed in headers")
+            elif 'caddy' in server_header.lower():
+                self.log_good("Using Caddy server (good choice)")
+            
+            # Check for debug information
+            if 'debug' in response.text.lower() or 'traceback' in response.text.lower():
+                self.log_issue("Debug information may be exposed")
+            else:
+                self.log_good("No debug information visible")
+        
+        except Exception as e:
+            self.log_warning(f"Info disclosure check failed: {e}")
+    
+    def run_audit(self):
+        """Run complete security audit"""
+        print("🔐 Auto-WG Security Audit")
+        print("=" * 50)
+        
+        # Run all checks
+        server_reachable = self.check_server_connectivity()
+        
+        if server_reachable:
+            self.check_ssl_configuration()
+            self.check_authentication()
+            self.check_rate_limiting()
+            self.check_exposed_endpoints()
+            self.check_server_info_disclosure()
+        
+        # Summary
+        print("\n" + "=" * 50)
+        print("📊 SECURITY AUDIT SUMMARY")
+        print("=" * 50)
+        
+        print(f"✅ Good practices: {len(self.good)}")
+        print(f"⚠️  Warnings: {len(self.warnings)}")
+        print(f"❌ Issues: {len(self.issues)}")
+        
+        if self.issues:
+            print(f"\n❌ CRITICAL ISSUES TO FIX:")
+            for issue in self.issues:
+                print(f"   • {issue}")
+        
+        if self.warnings:
+            print(f"\n⚠️  RECOMMENDATIONS:")
+            for warning in self.warnings:
+                print(f"   • {warning}")
+        
+        if not self.issues and not self.warnings:
+            print(f"\n🎉 EXCELLENT! No security issues found.")
+        elif not self.issues:
+            print(f"\n👍 GOOD! No critical issues, but some improvements possible.")
+        else:
+            print(f"\n⚠️  ATTENTION NEEDED! Please address the critical issues above.")
+        
+        print(f"\n💡 For more security tips, visit: https://github.com/cwilliams001/auto-wg/wiki/security")
+        
+        # Return exit code based on findings
+        return len(self.issues)
+
+def load_config_from_file():
+    """Load configuration from wg-admin config file"""
+    config_file = Path.home() / '.autowg' / 'config'
+    
+    if not config_file.exists():
+        return None, None
+    
+    config = configparser.ConfigParser()
+    config.read(config_file)
+    
+    try:
+        server_url = config['server']['url']
+        auth_key = config['server']['auth_key']
+        return server_url, auth_key
+    except KeyError:
+        return None, None
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Auto-WG Security Audit Tool",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  security-audit                                    # Use saved config
+  security-audit --url https://wg.example.com      # Specify server
+  security-audit --url https://wg.example.com --auth-key xyz123
+        """
+    )
+    
+    parser.add_argument('--url', help='Server URL (e.g., https://wg.example.com)')
+    parser.add_argument('--auth-key', help='Authentication key')
+    parser.add_argument('--config', help='Config file path (default: ~/.autowg/config)')
+    
+    args = parser.parse_args()
+    
+    # Try to load from config file if not provided
+    if not args.url or not args.auth_key:
+        server_url, auth_key = load_config_from_file()
+        
+        if not args.url:
+            args.url = server_url
+        if not args.auth_key:
+            args.auth_key = auth_key
+    
+    if not args.url:
+        print("❌ No server URL provided. Use --url or run 'wg-admin setup' first.")
+        sys.exit(1)
+    
+    # Run audit
+    auditor = SecurityAuditor(args.url, args.auth_key)
+    exit_code = auditor.run_audit()
+    
+    sys.exit(exit_code)
+
+if __name__ == '__main__':
+    main()

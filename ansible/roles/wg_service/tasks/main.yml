@@ -3,6 +3,7 @@
   pip:
     name:
       - flask
+      - flask-limiter
       - requests
     state: present
 
@@ -12,17 +13,27 @@
     state: directory
     mode: '0755'
 
+- name: Create security log file with proper permissions
+  file:
+    path: /opt/wg_service/security.log
+    state: touch
+    mode: '0600'
+    owner: root
+    group: root
+
 - name: Copy WireGuard service script
   template:
     src: wg_server.py.j2
     dest: "{{ wg_service_dir }}/wg_server.py"
     mode: '0755'
 
-- name: Create used IPs file
+- name: Create used IPs file with secure permissions
   file:
     path: /opt/wg_service/used_ips.json
     state: touch
-    mode: '0644'
+    mode: '0600'
+    owner: root
+    group: root
 
 - name: Create systemd service file
   template:

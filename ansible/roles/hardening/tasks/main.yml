@@ -1,0 +1,296 @@
+---
+# VPS Security Hardening Tasks
+
+- name: Update system packages
+  apt:
+    update_cache: yes
+    upgrade: dist
+    autoremove: yes
+    autoclean: yes
+  register: apt_result
+  retries: 3
+  delay: 10
+
+- name: Install essential security packages
+  apt:
+    name:
+      - fail2ban
+      - ufw
+      - unattended-upgrades
+      - apt-listchanges
+      - logwatch
+      - rkhunter
+      - chkrootkit
+      - aide
+      - lynis
+      - htop
+      - iotop
+      - nethogs
+    state: present
+
+- name: Remove unnecessary packages
+  apt:
+    name:
+      - telnet
+      - rsh-client
+      - rsh-redone-client
+      - talk
+      - talkd
+      - finger
+      - xinetd
+    state: absent
+    purge: yes
+
+# SSH Hardening
+- name: Backup original SSH config
+  copy:
+    src: /etc/ssh/sshd_config
+    dest: /etc/ssh/sshd_config.backup
+    remote_src: yes
+    backup: yes
+
+- name: Harden SSH configuration
+  template:
+    src: sshd_config.j2
+    dest: /etc/ssh/sshd_config
+    backup: yes
+    mode: '0600'
+    owner: root
+    group: root
+  notify: restart ssh
+
+- name: Set SSH banner
+  template:
+    src: ssh_banner.j2
+    dest: /etc/ssh/banner
+    mode: '0644'
+    owner: root
+    group: root
+
+# Firewall Configuration
+- name: Reset UFW to defaults
+  ufw:
+    state: reset
+
+- name: Set UFW default policies
+  ufw:
+    policy: "{{ item.policy }}"
+    direction: "{{ item.direction }}"
+  loop:
+    - { direction: 'incoming', policy: 'deny' }
+    - { direction: 'outgoing', policy: 'allow' }
+    - { direction: 'routed', policy: 'deny' }
+
+- name: Configure UFW rules for essential services
+  ufw:
+    rule: allow
+    port: "{{ item.port }}"
+    proto: "{{ item.proto }}"
+    comment: "{{ item.comment }}"
+  loop:
+    - { port: "22", proto: "tcp", comment: "SSH" }
+    - { port: "80", proto: "tcp", comment: "HTTP" }
+    - { port: "443", proto: "tcp", comment: "HTTPS" }
+    - { port: "{{ wireguard_port }}", proto: "udp", comment: "WireGuard" }
+    - { port: "{{ wg_service_port }}", proto: "tcp", comment: "WG Service" }
+
+- name: Configure UFW rate limiting for SSH
+  ufw:
+    rule: limit
+    port: "22"
+    proto: tcp
+    comment: "SSH rate limiting"
+
+- name: Enable UFW logging
+  ufw:
+    logging: "on"
+
+- name: Enable UFW
+  ufw:
+    state: enabled
+
+# Fail2ban Configuration
+- name: Configure fail2ban for SSH
+  template:
+    src: jail.local.j2
+    dest: /etc/fail2ban/jail.local
+    mode: '0644'
+    owner: root
+    group: root
+  notify: restart fail2ban
+
+- name: Create custom fail2ban filters
+  template:
+    src: "{{ item }}.j2"
+    dest: "/etc/fail2ban/filter.d/{{ item }}"
+    mode: '0644'
+    owner: root
+    group: root
+  loop:
+    - wireguard.conf
+  notify: restart fail2ban
+
+- name: Copy additional fail2ban filters
+  template:
+    src: "{{ item }}"
+    dest: "/etc/fail2ban/filter.d/{{ item }}"
+    mode: '0644'
+    owner: root
+    group: root
+  loop:
+    - portscan.conf
+    - recidive.conf
+  notify: restart fail2ban
+
+- name: Start and enable fail2ban
+  systemd:
+    name: fail2ban
+    state: started
+    enabled: yes
+
+# Automatic Updates
+- name: Configure unattended upgrades
+  template:
+    src: 50unattended-upgrades.j2
+    dest: /etc/apt/apt.conf.d/50unattended-upgrades
+    mode: '0644'
+    owner: root
+    group: root
+
+- name: Enable automatic updates
+  template:
+    src: 20auto-upgrades.j2
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    mode: '0644'
+    owner: root
+    group: root
+
+# System Hardening
+- name: Set kernel parameters for security
+  sysctl:
+    name: "{{ item.name }}"
+    value: "{{ item.value }}"
+    state: present
+    reload: yes
+  loop:
+    # Network security
+    - { name: 'net.ipv4.ip_forward', value: '1' }  # Needed for VPN
+    - { name: 'net.ipv4.conf.all.send_redirects', value: '0' }
+    - { name: 'net.ipv4.conf.default.send_redirects', value: '0' }
+    - { name: 'net.ipv4.conf.all.accept_redirects', value: '0' }
+    - { name: 'net.ipv4.conf.default.accept_redirects', value: '0' }
+    - { name: 'net.ipv4.conf.all.secure_redirects', value: '0' }
+    - { name: 'net.ipv4.conf.default.secure_redirects', value: '0' }
+    - { name: 'net.ipv4.conf.all.accept_source_route', value: '0' }
+    - { name: 'net.ipv4.conf.default.accept_source_route', value: '0' }
+    - { name: 'net.ipv4.conf.all.rp_filter', value: '1' }
+    - { name: 'net.ipv4.conf.default.rp_filter', value: '1' }
+    - { name: 'net.ipv4.icmp_echo_ignore_broadcasts', value: '1' }
+    - { name: 'net.ipv4.icmp_ignore_bogus_error_responses', value: '1' }
+    - { name: 'net.ipv4.tcp_syncookies', value: '1' }
+    - { name: 'net.ipv6.conf.all.accept_redirects', value: '0' }
+    - { name: 'net.ipv6.conf.default.accept_redirects', value: '0' }
+    - { name: 'net.ipv6.conf.all.accept_source_route', value: '0' }
+    - { name: 'net.ipv6.conf.default.accept_source_route', value: '0' }
+    # Memory protection
+    - { name: 'kernel.dmesg_restrict', value: '1' }
+    - { name: 'kernel.kptr_restrict', value: '2' }
+    - { name: 'kernel.yama.ptrace_scope', value: '1' }
+
+- name: Configure login security
+  template:
+    src: login.defs.j2
+    dest: /etc/login.defs
+    backup: yes
+    mode: '0644'
+    owner: root
+    group: root
+
+- name: Set password policy
+  template:
+    src: common-password.j2
+    dest: /etc/pam.d/common-password
+    backup: yes
+    mode: '0644'
+    owner: root
+    group: root
+
+# Disable unnecessary services
+- name: Disable unnecessary services
+  systemd:
+    name: "{{ item }}"
+    state: stopped
+    enabled: no
+  loop:
+    - bluetooth
+    - cups
+    - avahi-daemon
+  ignore_errors: yes
+
+# File permissions hardening
+- name: Set secure permissions on sensitive files
+  file:
+    path: "{{ item.path }}"
+    mode: "{{ item.mode }}"
+    owner: root
+    group: root
+  loop:
+    - { path: '/etc/passwd', mode: '0644' }
+    - { path: '/etc/shadow', mode: '0600' }
+    - { path: '/etc/group', mode: '0644' }
+    - { path: '/etc/gshadow', mode: '0600' }
+    - { path: '/etc/ssh/sshd_config', mode: '0600' }
+    - { path: '/etc/crontab', mode: '0600' }
+
+# Logging and monitoring
+- name: Configure rsyslog for security logging
+  template:
+    src: rsyslog-security.conf.j2
+    dest: /etc/rsyslog.d/10-security.conf
+    mode: '0644'
+    owner: root
+    group: root
+  notify: restart rsyslog
+
+- name: Create security monitoring script
+  template:
+    src: security-check.sh.j2
+    dest: /usr/local/bin/security-check.sh
+    mode: '0755'
+    owner: root
+    group: root
+
+- name: Schedule daily security checks
+  cron:
+    name: "Daily security check"
+    minute: "0"
+    hour: "2"
+    job: "/usr/local/bin/security-check.sh"
+    user: root
+
+# System information
+- name: Create system info script
+  template:
+    src: system-info.sh.j2
+    dest: /usr/local/bin/system-info.sh
+    mode: '0755'
+    owner: root
+    group: root
+
+- name: Set message of the day
+  template:
+    src: motd.j2
+    dest: /etc/motd
+    mode: '0644'
+    owner: root
+    group: root
+
+# Final security scan
+- name: Run initial security scan with lynis
+  command: lynis audit system --quick
+  register: lynis_result
+  ignore_errors: yes
+
+- name: Display security scan summary
+  debug:
+    msg: "Security hardening complete. Lynis scan exit code: {{ lynis_result.rc }}"

@@ -1,28 +1,324 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, render_template_string, redirect, url_for, flash, session
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 import subprocess
 import ipaddress
 import json
 import os
 import secrets
 import logging
+import re
+import hashlib
+import time
 
 app = Flask(__name__)
 
-# Set up logging
-logging.basicConfig(level=logging.DEBUG)
+# Security: Generate secret key from environment or use a secure default
+app.config['SECRET_KEY'] = os.environ.get('FLASK_SECRET_KEY', secrets.token_hex(32))
+
+# Set up rate limiting
+limiter = Limiter(
+    app,
+    key_func=get_remote_address,
+    default_limits=["100 per hour", "10 per minute"]
+)
+
+# Set up secure logging
+log_level = os.environ.get('LOG_LEVEL', 'INFO')
+logging.basicConfig(
+    level=getattr(logging, log_level.upper()),
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('{{ wg_service_dir }}/wg_service.log'),
+        logging.StreamHandler()
+    ]
+)
 logger = logging.getLogger(__name__)
 
-# Configuration
+# Configuration - Use environment variables for security
 WG_CONFIG_PATH = "{{ wireguard_config_path | default('/etc/wireguard/wg0.conf') }}"
-ALLOWED_KEYS = {{ auth_keys | to_json }}
-BASE_IP = "10.0.0"  # Hardcoded for consistent format
+ALLOWED_KEYS = os.environ.get('WG_AUTH_KEYS', '{{ auth_keys | join(",") }}').split(',')
+BASE_IP = os.environ.get('WG_BASE_IP', "10.0.0")
 USED_IPS_FILE = "{{ wg_service_dir }}/used_ips.json"
+MAX_CLIENT_NAME_LENGTH = 64
 
 # WireGuard Server Configuration
 SERVER_PUBLIC_KEY = "{{ wg_public_key }}"
 SERVER_ENDPOINT = "{{ ansible_host }}"
 SERVER_PORT = {{ wireguard_port }}
 NETWORK_CIDR = "{{ wireguard_network }}"
+
+# Web UI HTML Template
+WEB_UI_TEMPLATE = '''
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Auto-WG Management</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 1200px; margin: 0 auto; padding: 20px; background: #f5f5f5; }
+        .header { background: #2c3e50; color: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; }
+        .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 20px; }
+        .status-connected { color: #27ae60; font-weight: bold; }
+        .status-disconnected { color: #e74c3c; font-weight: bold; }
+        .btn { padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; text-decoration: none; display: inline-block; margin: 2px; }
+        .btn-primary { background: #3498db; color: white; }
+        .btn-danger { background: #e74c3c; color: white; }
+        .btn-success { background: #27ae60; color: white; }
+        .btn:hover { opacity: 0.8; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }
+        th { background: #f8f9fa; }
+        .form-group { margin-bottom: 15px; }
+        .form-group label { display: block; margin-bottom: 5px; font-weight: bold; }
+        .form-group input { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; }
+        .alert { padding: 15px; margin-bottom: 20px; border-radius: 4px; }
+        .alert-success { background: #d4edda; border: 1px solid #c3e6cb; color: #155724; }
+        .alert-error { background: #f8d7da; border: 1px solid #f5c6cb; color: #721c24; }
+        .stats { display: flex; gap: 20px; margin-bottom: 20px; }
+        .stat-card { flex: 1; background: white; padding: 15px; border-radius: 8px; text-align: center; }
+        .stat-number { font-size: 2em; font-weight: bold; color: #3498db; }
+        .config-output { background: #2c3e50; color: #ecf0f1; padding: 15px; border-radius: 4px; font-family: monospace; white-space: pre-wrap; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🔐 Auto-WG Management Dashboard</h1>
+        <p>WireGuard VPN Client Management Interface</p>
+    </div>
+
+    {% if message %}
+    <div class="alert alert-{{ message_type }}">{{ message }}</div>
+    {% endif %}
+
+    <div class="stats">
+        <div class="stat-card">
+            <div class="stat-number">{{ total_clients }}</div>
+            <div>Total Clients</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-number">{{ connected_clients }}</div>
+            <div>Connected</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-number">{{ available_ips }}</div>
+            <div>Available IPs</div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h3>📋 Connected Clients</h3>
+        {% if clients %}
+        <table>
+            <thead>
+                <tr>
+                    <th>Client Name</th>
+                    <th>IP Address</th>
+                    <th>Status</th>
+                    <th>Last Handshake</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for client in clients %}
+                <tr>
+                    <td>{{ client.name }}</td>
+                    <td>{{ client.ip }}</td>
+                    <td class="status-{{ client.status }}">{{ client.status|title }}</td>
+                    <td>{{ client.last_handshake }}</td>
+                    <td>
+                        <form method="POST" action="/revoke_client" style="display: inline;">
+                            <input type="hidden" name="client_name" value="{{ client.name }}">
+                            <button type="submit" class="btn btn-danger" onclick="return confirm('Are you sure you want to revoke access for {{ client.name }}?')">Revoke</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p>No clients connected yet.</p>
+        {% endif %}
+    </div>
+
+    <div class="card">
+        <h3>➕ Add New Client</h3>
+        <form method="POST" action="/add_client">
+            <div class="form-group">
+                <label for="client_name">Client Name:</label>
+                <input type="text" id="client_name" name="client_name" required pattern="[a-zA-Z0-9_-]+" title="Only letters, numbers, hyphens, and underscores allowed">
+            </div>
+            <button type="submit" class="btn btn-success">Generate Configuration</button>
+        </form>
+    </div>
+
+    {% if config_data %}
+    <div class="card">
+        <h3>📄 Client Configuration</h3>
+        <p><strong>Client:</strong> {{ config_client_name }}</p>
+        <p><strong>IP Address:</strong> {{ config_ip }}</p>
+        <p>Copy this configuration to your client device:</p>
+        <div class="config-output">{{ config_data }}</div>
+        <p><small>Save this as <code>/etc/wireguard/wg0.conf</code> on your client device.</small></p>
+    </div>
+    {% endif %}
+
+    <div class="card">
+        <h3>🔧 Server Actions</h3>
+        <a href="/restart_service" class="btn btn-primary" onclick="return confirm('Restart WireGuard service?')">Restart WireGuard</a>
+        <a href="/download_logs" class="btn btn-primary">Download Logs</a>
+        <a href="/health" class="btn btn-primary" target="_blank">Health Check</a>
+    </div>
+
+    <script>
+        // Auto-refresh every 30 seconds
+        setTimeout(function(){ location.reload(); }, 30000);
+    </script>
+</body>
+</html>
+'''
+
+def validate_client_name(client_name):
+    """Validate and sanitize client name"""
+    if not client_name:
+        raise ValueError("Client name is required")
+    
+    if len(client_name) > MAX_CLIENT_NAME_LENGTH:
+        raise ValueError(f"Client name too long (max {MAX_CLIENT_NAME_LENGTH} characters)")
+    
+    # Allow only alphanumeric characters, hyphens, and underscores
+    if not re.match(r'^[a-zA-Z0-9_-]+$', client_name):
+        raise ValueError("Client name contains invalid characters. Use only letters, numbers, hyphens, and underscores")
+    
+    return client_name.strip()
+
+def validate_auth_key(auth_key):
+    """Validate authentication key"""
+    if not auth_key:
+        raise ValueError("Authentication key is required")
+    
+    # Hash the key for comparison to prevent timing attacks
+    provided_hash = hashlib.sha256(auth_key.encode()).hexdigest()
+    valid_hashes = [hashlib.sha256(key.encode()).hexdigest() for key in ALLOWED_KEYS]
+    
+    if provided_hash not in valid_hashes:
+        raise ValueError("Invalid authentication key")
+    
+    return True
+
+def log_security_event(event_type, client_ip, details=None):
+    """Log security-related events for audit purposes"""
+    timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
+    log_entry = {
+        'timestamp': timestamp,
+        'event_type': event_type,
+        'client_ip': client_ip,
+        'details': details or {}
+    }
+    
+    # Log to both application log and security log
+    logger.warning(f"SECURITY_EVENT: {json.dumps(log_entry)}")
+    
+    # Also write to separate security log file
+    security_log_path = "{{ wg_service_dir }}/security.log"
+    try:
+        with open(security_log_path, 'a') as f:
+            f.write(f"{json.dumps(log_entry)}\n")
+    except Exception as e:
+        logger.error(f"Failed to write security log: {e}")
+
+def revoke_client(client_name):
+    """Revoke a client's access by removing from config and IP allocation"""
+    try:
+        # Load current used IPs
+        used_ips = load_used_ips()
+        
+        if client_name not in used_ips:
+            raise ValueError(f"Client {client_name} not found")
+        
+        client_ip = used_ips[client_name]
+        
+        # Remove from WireGuard config
+        if os.path.exists(WG_CONFIG_PATH):
+            with open(WG_CONFIG_PATH, 'r') as f:
+                lines = f.readlines()
+            
+            # Filter out the client's peer section
+            new_lines = []
+            skip_section = False
+            
+            for line in lines:
+                if line.strip() == f"# {client_name}":
+                    skip_section = True
+                    continue
+                elif line.strip().startswith('# ') and skip_section:
+                    skip_section = False
+                    new_lines.append(line)
+                elif line.strip().startswith('[Peer]') and skip_section:
+                    # Skip the entire peer section
+                    continue
+                elif skip_section and (line.strip().startswith('PublicKey') or 
+                                     line.strip().startswith('AllowedIPs')):
+                    continue
+                elif skip_section and line.strip() == '':
+                    skip_section = False
+                    continue
+                else:
+                    if not skip_section:
+                        new_lines.append(line)
+            
+            # Write back the cleaned config
+            with open(WG_CONFIG_PATH, 'w') as f:
+                f.writelines(new_lines)
+        
+        # Remove from used IPs
+        del used_ips[client_name]
+        with open(USED_IPS_FILE, 'w') as f:
+            json.dump(used_ips, f)
+        
+        # Reload WireGuard
+        reload_wireguard()
+        
+        logger.info(f"Successfully revoked client: {client_name}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error revoking client {client_name}: {str(e)}")
+        raise
+
+def get_client_status():
+    """Get detailed client status information"""
+    try:
+        used_ips = load_used_ips()
+        
+        # Get WireGuard status
+        wg_output = subprocess.run(["wg", "show"], capture_output=True, text=True, check=True)
+        
+        # Parse WireGuard output to get connection status
+        clients = []
+        for client_name, ip in used_ips.items():
+            client_info = {
+                'name': client_name,
+                'ip': ip,
+                'status': 'disconnected',
+                'last_handshake': 'Never',
+                'transfer_rx': '0 B',
+                'transfer_tx': '0 B'
+            }
+            
+            # Look for this client in WireGuard output
+            if f"{ip}/32" in wg_output.stdout:
+                client_info['status'] = 'connected'
+                # You could parse more detailed info from wg_output here
+            
+            clients.append(client_info)
+        
+        return clients
+        
+    except Exception as e:
+        logger.error(f"Error getting client status: {str(e)}")
+        return []
 
 def load_used_ips():
     try:
@@ -124,33 +420,37 @@ def reload_wireguard():
             raise
 
 @app.route('/generate_config', methods=['POST'])
+@limiter.limit("5 per minute")
 def generate_config():
+    client_ip = request.remote_addr
+    
     try:
-        # Debug logging
-        logger.debug(f"Received headers: {dict(request.headers)}")
-        logger.debug(f"Received raw data: {request.get_data(as_text=True)}")
-        
+        # Validate authentication
         auth_key = request.headers.get('Authorization')
-        logger.debug(f"Received request with auth key: {auth_key}")
         
-        # Debug the request body
+        try:
+            validate_auth_key(auth_key)
+        except ValueError as e:
+            log_security_event('auth_failure', client_ip, {'error': str(e)})
+            return jsonify({"error": "Unauthorized"}), 401
+        
+        # Parse and validate request
         try:
             request_json = request.get_json()
-            logger.debug(f"Parsed JSON: {request_json}")
+            if not request_json:
+                raise ValueError("Invalid JSON format")
         except Exception as e:
-            logger.error(f"Error parsing JSON: {str(e)}")
+            log_security_event('invalid_request', client_ip, {'error': str(e)})
             return jsonify({"error": f"Invalid JSON format: {str(e)}"}), 400
 
-        if auth_key not in ALLOWED_KEYS:
-            logger.warning(f"Unauthorized access attempt with key: {auth_key}")
-            return jsonify({"error": "Unauthorized"}), 401
+        # Validate client name
+        try:
+            client_name = validate_client_name(request_json.get('client_name'))
+        except ValueError as e:
+            log_security_event('invalid_client_name', client_ip, {'error': str(e)})
+            return jsonify({"error": str(e)}), 400
 
-        client_name = request_json.get('client_name')
-        if not client_name:
-            logger.warning("Missing client name in request")
-            return jsonify({"error": "Client name required"}), 400
-
-        logger.info(f"Generating config for client: {client_name}")
+        logger.info(f"Generating config for client: {client_name} from IP: {client_ip}")
         
         # Clean config file before adding new peer
         clean_config_file()
@@ -213,32 +513,263 @@ AllowedIPs = {client_ip}/32
             "ip": client_ip
         }
         
+        # Log successful config generation
+        log_security_event('config_generated', request.remote_addr, {
+            'client_name': client_name,
+            'assigned_ip': client_ip
+        })
+        
         logger.info(f"Successfully generated config for {client_name}")
         return jsonify(response_data)
 
     except Exception as e:
+        log_security_event('config_generation_error', request.remote_addr, {
+            'error': str(e),
+            'client_name': request_json.get('client_name') if 'request_json' in locals() else 'unknown'
+        })
         logger.error(f"Error generating config: {str(e)}", exc_info=True)
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 @app.route('/list_clients', methods=['GET'])
+@limiter.limit("10 per minute")
 def list_clients():
+    client_ip = request.remote_addr
+    
     try:
-        if request.headers.get('Authorization') not in ALLOWED_KEYS:
+        # Validate authentication
+        auth_key = request.headers.get('Authorization')
+        
+        try:
+            validate_auth_key(auth_key)
+        except ValueError as e:
+            log_security_event('auth_failure', client_ip, {'endpoint': 'list_clients'})
             return jsonify({"error": "Unauthorized"}), 401
         
         used_ips = load_used_ips()
+        
+        log_security_event('clients_listed', client_ip, {'client_count': len(used_ips)})
         return jsonify(used_ips)
+        
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        log_security_event('list_clients_error', client_ip, {'error': str(e)})
+        logger.error(f"Error listing clients: {str(e)}", exc_info=True)
+        return jsonify({"error": "Internal server error"}), 500
 
 @app.route('/health', methods=['GET'])
+@limiter.limit("30 per minute")
 def health_check():
     try:
         # Check if WireGuard is running
-        subprocess.run(["wg", "show"], check=True)
-        return jsonify({"status": "healthy"})
+        subprocess.run(["wg", "show"], check=True, capture_output=True)
+        return jsonify({"status": "healthy", "timestamp": time.strftime('%Y-%m-%d %H:%M:%S')})
     except Exception as e:
-        return jsonify({"status": "unhealthy", "error": str(e)}), 500
+        logger.error(f"Health check failed: {str(e)}")
+        return jsonify({"status": "unhealthy", "timestamp": time.strftime('%Y-%m-%d %H:%M:%S')}), 500
+
+# Web UI Routes
+@app.route('/')
+def dashboard():
+    """Main dashboard page"""
+    try:
+        clients = get_client_status()
+        used_ips = load_used_ips()
+        
+        connected_count = sum(1 for client in clients if client['status'] == 'connected')
+        available_ips = 253 - len(used_ips)  # 254 - 1 (server) - used
+        
+        return render_template_string(WEB_UI_TEMPLATE,
+            clients=clients,
+            total_clients=len(clients),
+            connected_clients=connected_count,
+            available_ips=available_ips
+        )
+    except Exception as e:
+        logger.error(f"Error loading dashboard: {str(e)}")
+        return render_template_string(WEB_UI_TEMPLATE,
+            clients=[],
+            total_clients=0,
+            connected_clients=0,
+            available_ips=0,
+            message="Error loading dashboard data",
+            message_type="error"
+        )
+
+@app.route('/add_client', methods=['POST'])
+@limiter.limit("3 per minute")
+def add_client_web():
+    """Web form handler for adding clients"""
+    try:
+        client_name = request.form.get('client_name')
+        
+        # Validate client name
+        try:
+            client_name = validate_client_name(client_name)
+        except ValueError as e:
+            clients = get_client_status()
+            used_ips = load_used_ips()
+            return render_template_string(WEB_UI_TEMPLATE,
+                clients=clients,
+                total_clients=len(clients),
+                connected_clients=sum(1 for c in clients if c['status'] == 'connected'),
+                available_ips=253 - len(used_ips),
+                message=str(e),
+                message_type="error"
+            )
+        
+        # Check if client already exists
+        used_ips = load_used_ips()
+        if client_name in used_ips:
+            clients = get_client_status()
+            return render_template_string(WEB_UI_TEMPLATE,
+                clients=clients,
+                total_clients=len(clients),
+                connected_clients=sum(1 for c in clients if c['status'] == 'connected'),
+                available_ips=253 - len(used_ips),
+                message=f"Client '{client_name}' already exists",
+                message_type="error"
+            )
+        
+        # Generate configuration (reuse existing logic)
+        clean_config_file()
+        private_key, public_key = generate_wireguard_keys()
+        client_ip = get_next_available_ip()
+        
+        # Create client config
+        client_config = f"""[Interface]
+PrivateKey = {private_key}
+Address = {client_ip}/24
+DNS = 9.9.9.9, 1.1.1.1
+
+[Peer]
+PublicKey = {SERVER_PUBLIC_KEY}
+Endpoint = {SERVER_ENDPOINT}:{SERVER_PORT}
+AllowedIPs = {NETWORK_CIDR}
+PersistentKeepalive = 25"""
+
+        # Update server config
+        server_config_addition = f"""
+# {client_name}
+[Peer]
+PublicKey = {public_key}
+AllowedIPs = {client_ip}/32
+"""
+        
+        with open(WG_CONFIG_PATH, 'a') as f:
+            f.write(server_config_addition)
+
+        # Save used IP
+        used_ips[client_name] = client_ip
+        with open(USED_IPS_FILE, 'w') as f:
+            json.dump(used_ips, f)
+
+        # Reload WireGuard
+        reload_wireguard()
+        
+        # Log the event
+        log_security_event('web_config_generated', request.remote_addr, {
+            'client_name': client_name,
+            'assigned_ip': client_ip
+        })
+        
+        # Return dashboard with config
+        clients = get_client_status()
+        return render_template_string(WEB_UI_TEMPLATE,
+            clients=clients,
+            total_clients=len(clients),
+            connected_clients=sum(1 for c in clients if c['status'] == 'connected'),
+            available_ips=253 - len(used_ips),
+            config_data=client_config,
+            config_client_name=client_name,
+            config_ip=client_ip,
+            message=f"Configuration generated for {client_name}",
+            message_type="success"
+        )
+        
+    except Exception as e:
+        logger.error(f"Error adding client via web: {str(e)}")
+        clients = get_client_status()
+        used_ips = load_used_ips()
+        return render_template_string(WEB_UI_TEMPLATE,
+            clients=clients,
+            total_clients=len(clients),
+            connected_clients=sum(1 for c in clients if c['status'] == 'connected'),
+            available_ips=253 - len(used_ips),
+            message="Error generating configuration",
+            message_type="error"
+        )
+
+@app.route('/revoke_client', methods=['POST'])
+@limiter.limit("5 per minute")
+def revoke_client_web():
+    """Web form handler for revoking clients"""
+    try:
+        client_name = request.form.get('client_name')
+        
+        if not client_name:
+            raise ValueError("Client name is required")
+        
+        # Revoke the client
+        revoke_client(client_name)
+        
+        log_security_event('web_client_revoked', request.remote_addr, {
+            'client_name': client_name
+        })
+        
+        # Redirect back to dashboard with success message
+        clients = get_client_status()
+        used_ips = load_used_ips()
+        return render_template_string(WEB_UI_TEMPLATE,
+            clients=clients,
+            total_clients=len(clients),
+            connected_clients=sum(1 for c in clients if c['status'] == 'connected'),
+            available_ips=253 - len(used_ips),
+            message=f"Client '{client_name}' has been revoked",
+            message_type="success"
+        )
+        
+    except Exception as e:
+        logger.error(f"Error revoking client via web: {str(e)}")
+        clients = get_client_status()
+        used_ips = load_used_ips()
+        return render_template_string(WEB_UI_TEMPLATE,
+            clients=clients,
+            total_clients=len(clients),
+            connected_clients=sum(1 for c in clients if c['status'] == 'connected'),
+            available_ips=253 - len(used_ips),
+            message=f"Error revoking client: {str(e)}",
+            message_type="error"
+        )
+
+@app.route('/restart_service')
+@limiter.limit("2 per minute")
+def restart_service():
+    """Restart WireGuard service"""
+    try:
+        subprocess.run(["systemctl", "restart", "wg-quick@wg0"], check=True)
+        log_security_event('service_restarted', request.remote_addr)
+        
+        clients = get_client_status()
+        used_ips = load_used_ips()
+        return render_template_string(WEB_UI_TEMPLATE,
+            clients=clients,
+            total_clients=len(clients),
+            connected_clients=sum(1 for c in clients if c['status'] == 'connected'),
+            available_ips=253 - len(used_ips),
+            message="WireGuard service restarted successfully",
+            message_type="success"
+        )
+    except Exception as e:
+        logger.error(f"Error restarting service: {str(e)}")
+        clients = get_client_status()
+        used_ips = load_used_ips()
+        return render_template_string(WEB_UI_TEMPLATE,
+            clients=clients,
+            total_clients=len(clients),
+            connected_clients=sum(1 for c in clients if c['status'] == 'connected'),
+            available_ips=253 - len(used_ips),
+            message="Error restarting service",
+            message_type="error"
+        )
 
 if __name__ == '__main__':
     # Ensure the USED_IPS_FILE directory exists
@@ -249,4 +780,16 @@ if __name__ == '__main__':
         with open(USED_IPS_FILE, 'w') as f:
             json.dump({}, f)
     
-    app.run(host='0.0.0.0', port={{ wg_service_port }}, debug=True)
+    # Security: Disable debug mode in production
+    debug_mode = os.environ.get('FLASK_DEBUG', 'False').lower() == 'true'
+    
+    # Set secure file permissions for sensitive files
+    try:
+        os.chmod(USED_IPS_FILE, 0o600)
+        if os.path.exists("{{ wg_service_dir }}/security.log"):
+            os.chmod("{{ wg_service_dir }}/security.log", 0o600)
+    except Exception as e:
+        logger.warning(f"Could not set secure file permissions: {e}")
+    
+    logger.info(f"Starting WireGuard service on port {{ wg_service_port }} (debug={debug_mode})")
+    app.run(host='0.0.0.0', port={{ wg_service_port }}, debug=debug_mode)

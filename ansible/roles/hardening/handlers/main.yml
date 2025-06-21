@@ -1,0 +1,24 @@
+---
+# Handlers for hardening role
+
+- name: restart ssh
+  systemd:
+    name: ssh
+    state: restarted
+  # Add a delay to prevent connection loss during deployment
+  async: 10
+  poll: 0
+
+- name: restart fail2ban
+  systemd:
+    name: fail2ban
+    state: restarted
+
+- name: restart rsyslog
+  systemd:
+    name: rsyslog
+    state: restarted
+
+- name: reload ufw
+  ufw:
+    state: reloaded

@@ -6,9 +6,19 @@ After=network.target
 Type=simple
 User=root
 WorkingDirectory=/opt/wg_service
+Environment=FLASK_DEBUG=False
+Environment=LOG_LEVEL=INFO
+Environment=WG_AUTH_KEYS={{ auth_keys | join(',') }}
+Environment=WG_BASE_IP=10.0.0
 ExecStart=/usr/bin/python3 /opt/wg_service/wg_server.py
 Restart=always
 RestartSec=3
+# Security hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/opt/wg_service /etc/wireguard
+PrivateTmp=yes
 
 [Install]
 WantedBy=multi-user.target

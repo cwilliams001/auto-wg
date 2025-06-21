@@ -3,10 +3,25 @@ import subprocess
 import os
 import sys
 import platform
+import re
+import logging
 
 SERVER_URL = "${wireguard_server_url}"
 AUTH_KEY = "${auth_key}"
 WG_CONFIG_PATH = "/etc/wireguard/wg0.conf"
+
+# Set up logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+def validate_hostname(hostname):
+    """Validate hostname to prevent injection attacks"""
+    if not hostname or len(hostname) > 64:
+        return False
+    # Allow only alphanumeric characters, hyphens, and dots
+    if not re.match(r'^[a-zA-Z0-9.-]+$', hostname):
+        return False
+    return True
 
 def check_dependencies():
     """Check if all required dependencies are installed"""
@@ -24,44 +39,70 @@ def install_wireguard():
     system = platform.system().lower()
     try:
         if system == 'linux':
-            # Update package list
-            subprocess.run(["apt", "update"], check=True)
-            # Install WireGuard and required dependencies
+            logger.info("🔄 Updating package lists...")
+            subprocess.run(["apt", "update"], check=True, capture_output=True)
+            
+            logger.info("📦 Installing WireGuard and dependencies...")
             subprocess.run([
                 "apt", "install", "-y",
                 "wireguard",
                 "resolvconf"
-            ], check=True)
-            print("WireGuard and dependencies installed successfully")
+            ], check=True, capture_output=True)
+            logger.info("✅ WireGuard and dependencies installed successfully")
         else:
-            print(f"Unsupported operating system: {system}")
+            logger.error(f"❌ Unsupported operating system: {system}")
+            logger.error("This script only supports Linux systems")
             sys.exit(1)
     except subprocess.CalledProcessError as e:
-        print(f"Error installing WireGuard: {str(e)}")
+        logger.error(f"❌ Error installing WireGuard: {str(e)}")
+        logger.error("Please check your internet connection and package manager")
+        logger.error("You may need to run: sudo apt update && sudo apt install wireguard resolvconf")
         sys.exit(1)
 
 def setup_wireguard():
     # Check dependencies
     missing_deps = check_dependencies()
     if missing_deps:
-        print(f"Missing dependencies: {', '.join(missing_deps)}")
-        print("Installing required packages...")
+        logger.info(f"Missing dependencies: {', '.join(missing_deps)}")
+        logger.info("Installing required packages...")
         install_wireguard()
 
     # Get hostname for client name
-    hostname = subprocess.check_output(["hostname"]).decode().strip()
-
-    print(f"Requesting config for {hostname}...")
     try:
-        # Request config from server
+        hostname = subprocess.check_output(["hostname"], timeout=10).decode().strip()
+    except (subprocess.TimeoutExpired, subprocess.CalledProcessError) as e:
+        logger.error(f"Failed to get hostname: {e}")
+        sys.exit(1)
+
+    # Validate hostname
+    if not validate_hostname(hostname):
+        logger.error(f"Invalid hostname: {hostname}")
+        sys.exit(1)
+
+    logger.info(f"Requesting config for {hostname}...")
+    try:
+        # Request config from server with security settings
         response = requests.post(
             SERVER_URL,
             headers={"Authorization": AUTH_KEY},
-            json={"client_name": hostname}
+            json={"client_name": hostname},
+            timeout=30,
+            verify=True  # Verify SSL certificates
         )
 
         if response.status_code != 200:
-            print(f"Error: {response.json().get('error', 'Unknown error')}")
+            error_msg = response.json().get('error', 'Unknown error') if response.headers.get('content-type', '').startswith('application/json') else f"HTTP {response.status_code}"
+            logger.error(f"❌ Server error: {error_msg}")
+            
+            if response.status_code == 401:
+                logger.error("Authentication failed. Please check your auth key.")
+            elif response.status_code == 400:
+                logger.error("Invalid request. Please check the client name format.")
+            elif response.status_code == 429:
+                logger.error("Rate limit exceeded. Please wait and try again.")
+            elif response.status_code >= 500:
+                logger.error("Server error. Please contact your administrator.")
+            
             sys.exit(1)
 
         # Create WireGuard directory if it doesn't exist
@@ -74,42 +115,88 @@ def setup_wireguard():
 
         # Set proper permissions
         os.chmod(WG_CONFIG_PATH, 0o600)
-        print("WireGuard configuration saved successfully")
+        logger.info("✅ WireGuard configuration saved successfully")
 
         # Enable and start WireGuard
         try:
-            # Make sure resolvconf service is running
-            subprocess.run(["systemctl", "start", "resolvconf.service"], check=True)
+            logger.info("🔄 Starting resolvconf service...")
+            subprocess.run(["systemctl", "start", "resolvconf.service"], 
+                         check=True, capture_output=True)
 
-            # Enable and start WireGuard
-            subprocess.run(["systemctl", "enable", "wg-quick@wg0"], check=True)
-            subprocess.run(["systemctl", "restart", "wg-quick@wg0"], check=True)
-            print("WireGuard service enabled and started")
+            logger.info("🔄 Enabling WireGuard service...")
+            subprocess.run(["systemctl", "enable", "wg-quick@wg0"], 
+                         check=True, capture_output=True)
+            
+            logger.info("🔄 Starting WireGuard connection...")
+            subprocess.run(["systemctl", "restart", "wg-quick@wg0"], 
+                         check=True, capture_output=True)
+            logger.info("✅ WireGuard service enabled and started")
         except subprocess.CalledProcessError as e:
-            print(f"Error managing WireGuard service: {str(e)}")
+            logger.error(f"❌ Error managing WireGuard service: {str(e)}")
+            logger.error("Try running manually: sudo systemctl restart wg-quick@wg0")
             sys.exit(1)
 
-        print(f"WireGuard configured with IP: {response.json()['ip']}")
+        assigned_ip = response.json()['ip']
+        logger.info(f"🎯 WireGuard configured with IP: {assigned_ip}")
 
         # Verify connection
         try:
-            subprocess.run(["wg", "show"], check=True)
-            print("WireGuard interface is up and running")
+            logger.info("🔍 Verifying WireGuard interface...")
+            wg_output = subprocess.run(["wg", "show"], check=True, capture_output=True, text=True)
+            if assigned_ip in wg_output.stdout or "interface: wg0" in wg_output.stdout:
+                logger.info("✅ WireGuard interface is up and running")
+            else:
+                logger.warning("⚠️  WireGuard is running but interface details unclear")
         except subprocess.CalledProcessError as e:
-            print(f"Warning: Could not verify WireGuard interface: {str(e)}")
+            logger.warning(f"⚠️  Could not verify WireGuard interface: {str(e)}")
+            logger.info("This is usually fine - the connection may still work")
 
+        logger.info("🎉 Setup complete! You should now be connected to the VPN")
+
+    except requests.exceptions.SSLError as e:
+        logger.error(f"❌ SSL certificate error: {str(e)}")
+        logger.error("The server's SSL certificate could not be verified")
+        logger.error("This could indicate a security issue or misconfiguration")
+        sys.exit(1)
+    except requests.exceptions.ConnectionError as e:
+        logger.error(f"❌ Connection error: {str(e)}")
+        logger.error("Could not connect to the server. Please check:")
+        logger.error("- Your internet connection")
+        logger.error("- The server URL and port")
+        logger.error("- Server firewall settings")
+        sys.exit(1)
+    except requests.exceptions.Timeout as e:
+        logger.error(f"❌ Request timeout: {str(e)}")
+        logger.error("The server took too long to respond")
+        sys.exit(1)
     except requests.exceptions.RequestException as e:
-        print(f"Error communicating with server: {str(e)}")
+        logger.error(f"❌ Network error: {str(e)}")
+        sys.exit(1)
+    except json.JSONDecodeError as e:
+        logger.error(f"❌ Invalid server response: {str(e)}")
+        logger.error("The server returned an unexpected response format")
         sys.exit(1)
     except Exception as e:
-        print(f"Unexpected error: {str(e)}")
+        logger.error(f"❌ Unexpected error: {str(e)}")
+        logger.error("An unexpected error occurred during setup")
         sys.exit(1)
 
 if __name__ == '__main__':
     # Check if running as root
     if os.geteuid() != 0:
-        print("This script must be run as root")
+        logger.error("❌ This script must be run as root")
+        logger.error("Please run: sudo python3 client_setup.py")
         sys.exit(1)
 
-    print("Starting WireGuard setup...")
-    setup_wireguard()
+    logger.info("🚀 Starting Auto-WG client setup...")
+    logger.info(f"📡 Connecting to server: {SERVER_URL}")
+    
+    try:
+        setup_wireguard()
+    except KeyboardInterrupt:
+        logger.warning("⚠️  Setup interrupted by user")
+        sys.exit(1)
+    except Exception as e:
+        logger.error(f"❌ Setup failed: {str(e)}")
+        logger.error("Please check the logs above for more details")
+        sys.exit(1)

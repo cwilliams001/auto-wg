@@ -1,0 +1,254 @@
+#!/usr/bin/env python3
+
+"""
+Auto-WG Admin CLI Tool
+Command-line interface for managing WireGuard clients
+"""
+
+import argparse
+import json
+import requests
+import sys
+import os
+from urllib.parse import urljoin
+import configparser
+from pathlib import Path
+
+class WGAdmin:
+    def __init__(self, config_file=None):
+        self.config_file = config_file or os.path.expanduser("~/.autowg/config")
+        self.load_config()
+    
+    def load_config(self):
+        """Load configuration from file"""
+        config_path = Path(self.config_file)
+        
+        if not config_path.exists():
+            print(f"❌ Config file not found: {self.config_file}")
+            print("Run 'wg-admin setup' to create configuration")
+            sys.exit(1)
+        
+        config = configparser.ConfigParser()
+        config.read(self.config_file)
+        
+        try:
+            self.server_url = config['server']['url']
+            self.auth_key = config['server']['auth_key']
+        except KeyError as e:
+            print(f"❌ Missing config section: {e}")
+            sys.exit(1)
+    
+    def save_config(self, server_url, auth_key):
+        """Save configuration to file"""
+        config_path = Path(self.config_file)
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        config = configparser.ConfigParser()
+        config['server'] = {
+            'url': server_url,
+            'auth_key': auth_key
+        }
+        
+        with open(self.config_file, 'w') as f:
+            config.write(f)
+        
+        # Set secure permissions
+        os.chmod(self.config_file, 0o600)
+        print(f"✅ Configuration saved to {self.config_file}")
+    
+    def make_request(self, endpoint, method='GET', data=None):
+        """Make HTTP request to server"""
+        url = urljoin(self.server_url, endpoint)
+        headers = {'Authorization': self.auth_key}
+        
+        try:
+            if method == 'POST':
+                response = requests.post(url, headers=headers, json=data, timeout=30)
+            else:
+                response = requests.get(url, headers=headers, timeout=30)
+            
+            return response
+        except requests.exceptions.RequestException as e:
+            print(f"❌ Connection error: {e}")
+            sys.exit(1)
+    
+    def list_clients(self):
+        """List all clients"""
+        response = self.make_request('/list_clients')
+        
+        if response.status_code == 200:
+            clients = response.json()
+            
+            if not clients:
+                print("📋 No clients found")
+                return
+            
+            print("📋 Client List:")
+            print("-" * 50)
+            for name, ip in clients.items():
+                print(f"  {name:<20} {ip}")
+        else:
+            print(f"❌ Error: {response.json().get('error', 'Unknown error')}")
+            sys.exit(1)
+    
+    def add_client(self, client_name):
+        """Add a new client"""
+        data = {'client_name': client_name}
+        response = self.make_request('/generate_config', 'POST', data)
+        
+        if response.status_code == 200:
+            result = response.json()
+            print(f"✅ Client '{client_name}' added successfully")
+            print(f"📍 Assigned IP: {result['ip']}")
+            print("\n📄 Configuration:")
+            print("-" * 50)
+            print(result['config'])
+            print("-" * 50)
+            print(f"\n💾 Save this config to /etc/wireguard/wg0.conf on your client device")
+        else:
+            error_msg = response.json().get('error', 'Unknown error')
+            print(f"❌ Error adding client: {error_msg}")
+            sys.exit(1)
+    
+    def check_health(self):
+        """Check server health"""
+        response = self.make_request('/health')
+        
+        if response.status_code == 200:
+            result = response.json()
+            status = result.get('status', 'unknown')
+            timestamp = result.get('timestamp', 'unknown')
+            
+            if status == 'healthy':
+                print(f"✅ Server is healthy (checked at {timestamp})")
+            else:
+                print(f"⚠️  Server status: {status} (checked at {timestamp})")
+        else:
+            print(f"❌ Health check failed: {response.status_code}")
+            sys.exit(1)
+    
+    def setup_config(self, server_url, auth_key):
+        """Setup configuration interactively"""
+        print("🔧 Auto-WG Admin Setup")
+        print("-" * 30)
+        
+        if not server_url:
+            server_url = input("Server URL (e.g., https://wg.example.com): ").strip()
+        
+        if not auth_key:
+            auth_key = input("Authentication key: ").strip()
+        
+        # Validate connection
+        print("🔍 Testing connection...")
+        test_admin = WGAdmin.__new__(WGAdmin)
+        test_admin.server_url = server_url
+        test_admin.auth_key = auth_key
+        
+        try:
+            response = test_admin.make_request('/health')
+            if response.status_code == 200:
+                print("✅ Connection successful!")
+            else:
+                print(f"⚠️  Connection test returned: {response.status_code}")
+                if input("Continue anyway? (y/N): ").lower() != 'y':
+                    sys.exit(1)
+        except:
+            print("❌ Connection test failed")
+            if input("Continue anyway? (y/N): ").lower() != 'y':
+                sys.exit(1)
+        
+        self.save_config(server_url, auth_key)
+    
+    def show_status(self):
+        """Show detailed status"""
+        print("🔍 Auto-WG Status")
+        print("-" * 30)
+        
+        # Check health
+        health_response = self.make_request('/health')
+        if health_response.status_code == 200:
+            result = health_response.json()
+            print(f"Server Status: ✅ {result.get('status', 'unknown')}")
+        else:
+            print("Server Status: ❌ Unhealthy")
+        
+        # Get client count
+        clients_response = self.make_request('/list_clients')
+        if clients_response.status_code == 200:
+            clients = clients_response.json()
+            print(f"Total Clients: {len(clients)}")
+        else:
+            print("Total Clients: ❌ Unable to fetch")
+        
+        print(f"Config File: {self.config_file}")
+        print(f"Server URL: {self.server_url}")
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Auto-WG Admin CLI",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  wg-admin setup                          # Interactive setup
+  wg-admin list                          # List all clients
+  wg-admin add laptop-home               # Add new client
+  wg-admin health                        # Check server health
+  wg-admin status                        # Show detailed status
+        """
+    )
+    
+    parser.add_argument('--config', '-c', 
+                       help='Config file path (default: ~/.autowg/config)')
+    
+    subparsers = parser.add_subparsers(dest='command', help='Available commands')
+    
+    # Setup command
+    setup_parser = subparsers.add_parser('setup', help='Setup configuration')
+    setup_parser.add_argument('--server-url', help='Server URL')
+    setup_parser.add_argument('--auth-key', help='Authentication key')
+    
+    # List command
+    subparsers.add_parser('list', help='List all clients')
+    
+    # Add command
+    add_parser = subparsers.add_parser('add', help='Add new client')
+    add_parser.add_argument('client_name', help='Name of the client to add')
+    
+    # Health command
+    subparsers.add_parser('health', help='Check server health')
+    
+    # Status command
+    subparsers.add_parser('status', help='Show detailed status')
+    
+    args = parser.parse_args()
+    
+    if not args.command:
+        parser.print_help()
+        sys.exit(1)
+    
+    # Handle setup command (doesn't need existing config)
+    if args.command == 'setup':
+        admin = WGAdmin.__new__(WGAdmin)
+        admin.config_file = args.config or os.path.expanduser("~/.autowg/config")
+        admin.setup_config(args.server_url, args.auth_key)
+        return
+    
+    # For other commands, load existing config
+    try:
+        admin = WGAdmin(args.config)
+    except SystemExit:
+        print("\n💡 Tip: Run 'wg-admin setup' first to configure the tool")
+        sys.exit(1)
+    
+    # Execute commands
+    if args.command == 'list':
+        admin.list_clients()
+    elif args.command == 'add':
+        admin.add_client(args.client_name)
+    elif args.command == 'health':
+        admin.check_health()
+    elif args.command == 'status':
+        admin.show_status()
+
+if __name__ == '__main__':
+    main()

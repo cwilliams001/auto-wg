@@ -6,6 +6,7 @@
   
   roles:
     - common
+    - hardening
     - wireguard
     - wg_service
     - ssl
