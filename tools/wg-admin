@@ -159,8 +159,183 @@ class WGAdmin:
         
         self.save_config(server_url, auth_key)
     
+    def revoke_client(self, client_name):
+        """Revoke a client's access"""
+        print(f"🔒 Revoking access for client: {client_name}")
+        print("-" * 40)
+        
+        # Confirm revocation
+        confirm = input(f"Are you sure you want to revoke '{client_name}'? This cannot be undone. (y/N): ")
+        if confirm.lower() != 'y':
+            print("Revocation cancelled")
+            return
+        
+        data = {'client_name': client_name}
+        response = self.make_request('/revoke_client', 'POST', data)
+        
+        if response.status_code == 200:
+            result = response.json()
+            print(f"✅ {result.get('message', 'Client revoked successfully')}")
+            print("")
+            print("🔒 Client access has been revoked and removed from the server")
+            print("⚠️  The client's WireGuard configuration is now invalid")
+        elif response.status_code == 400:
+            error_msg = response.json().get('error', 'Unknown error')
+            if 'not found' in error_msg.lower():
+                print(f"❌ Client '{client_name}' not found")
+                print("\n💡 Use 'wg-admin list' to see available clients")
+            else:
+                print(f"❌ Error: {error_msg}")
+        else:
+            error_msg = response.json().get('error', 'Unknown error')
+            print(f"❌ Error revoking client: {error_msg}")
+            sys.exit(1)
+    
+    def show_detailed_status(self):
+        """Show detailed client status with connection info"""
+        print("🔍 Auto-WG Detailed Status")
+        print("-" * 50)
+        
+        # Check health
+        health_response = self.make_request('/health')
+        if health_response.status_code == 200:
+            result = health_response.json()
+            status = result.get('status', 'unknown')
+            timestamp = result.get('timestamp', 'unknown')
+            if status == 'healthy':
+                print(f"Server Status: ✅ {status} (checked at {timestamp})")
+            else:
+                print(f"Server Status: ⚠️  {status} (checked at {timestamp})")
+        else:
+            print("Server Status: ❌ Unhealthy")
+        
+        # Get detailed client status
+        status_response = self.make_request('/client_status')
+        if status_response.status_code == 200:
+            result = status_response.json()
+            clients = result.get('clients', [])
+            
+            if not clients:
+                print("\n📋 No clients found")
+                return
+            
+            print(f"\n📋 Client Status ({len(clients)} total):")
+            print("-" * 80)
+            print(f"{'Name':<20} {'IP Address':<15} {'Status':<12} {'Last Handshake':<15} {'RX/TX'}")
+            print("-" * 80)
+            
+            for client in clients:
+                name = client.get('name', 'unknown')[:19]
+                ip = client.get('ip', 'unknown')
+                status = client.get('status', 'unknown')
+                handshake = client.get('last_handshake', 'Never')[:14]
+                rx = client.get('transfer_rx', '0 B')
+                tx = client.get('transfer_tx', '0 B')
+                
+                if status == 'connected':
+                    status_icon = "🟢"
+                else:
+                    status_icon = "🔴"
+                
+                routes_str = ", ".join(client.get('routes', [])) or "None"
+                print(f"{name:<20} {ip:<15} {status_icon} {status:<10} {handshake:<15} {rx}/{tx}")
+                if client.get('routes'):
+                    print(f"{'  Routes:':<20} {routes_str}")
+        else:
+            print("\n❌ Unable to fetch detailed client status")
+        
+        print(f"\nConfig File: {self.config_file}")
+        print(f"Server URL: {self.server_url}")
+    
+    def add_route(self, client_name, subnet):
+        """Add a subnet route for a client"""
+        print(f"🔗 Adding subnet route for client: {client_name}")
+        print(f"📍 Subnet: {subnet}")
+        print("-" * 50)
+        
+        # Validate subnet format
+        try:
+            import ipaddress
+            ipaddress.ip_network(subnet, strict=True)
+        except ValueError:
+            print(f"❌ Invalid subnet format: {subnet}")
+            print("💡 Use CIDR notation like: 192.168.1.0/24")
+            sys.exit(1)
+        
+        data = {'client_name': client_name, 'subnet': subnet}
+        response = self.make_request('/add_route', 'POST', data)
+        
+        if response.status_code == 200:
+            result = response.json()
+            print(f"✅ {result.get('message', 'Route added successfully')}")
+            print("")
+            print("🔗 Subnet route configured successfully")
+            print(f"📍 Client '{client_name}' can now route traffic for {subnet}")
+            print("⚠️  Client device must be configured to route the subnet")
+        else:
+            error_msg = response.json().get('error', 'Unknown error')
+            print(f"❌ Error adding route: {error_msg}")
+            sys.exit(1)
+    
+    def remove_route(self, client_name, subnet):
+        """Remove a subnet route for a client"""
+        print(f"🔗 Removing subnet route for client: {client_name}")
+        print(f"📍 Subnet: {subnet}")
+        print("-" * 50)
+        
+        # Confirm removal
+        confirm = input(f"Remove route {subnet} from '{client_name}'? (y/N): ")
+        if confirm.lower() != 'y':
+            print("Route removal cancelled")
+            return
+        
+        data = {'client_name': client_name, 'subnet': subnet}
+        response = self.make_request('/remove_route', 'POST', data)
+        
+        if response.status_code == 200:
+            result = response.json()
+            print(f"✅ {result.get('message', 'Route removed successfully')}")
+        else:
+            error_msg = response.json().get('error', 'Unknown error')
+            print(f"❌ Error removing route: {error_msg}")
+            sys.exit(1)
+    
+    def list_routes(self, client_name=None):
+        """List subnet routes for clients"""
+        if client_name:
+            print(f"🔗 Routes for client: {client_name}")
+        else:
+            print("🔗 All Client Routes")
+        print("-" * 50)
+        
+        params = {'client_name': client_name} if client_name else {}
+        response = self.make_request('/list_routes', 'GET')
+        
+        if response.status_code == 200:
+            result = response.json()
+            routes = result.get('routes', {})
+            
+            if not routes:
+                if client_name:
+                    print(f"📋 No routes configured for client '{client_name}'")
+                else:
+                    print("📋 No routes configured for any clients")
+                return
+            
+            for client, client_routes in routes.items():
+                if client_routes:
+                    print(f"\n🖥️  {client}:")
+                    for route in client_routes:
+                        print(f"  📍 {route}")
+                else:
+                    print(f"\n🖥️  {client}: No routes")
+        else:
+            error_msg = response.json().get('error', 'Unknown error')
+            print(f"❌ Error listing routes: {error_msg}")
+            sys.exit(1)
+    
     def show_status(self):
-        """Show detailed status"""
+        """Show basic status (for backward compatibility)"""
         print("🔍 Auto-WG Status")
         print("-" * 30)
         
@@ -192,8 +367,14 @@ Examples:
   wg-admin setup                          # Interactive setup
   wg-admin list                          # List all clients
   wg-admin add laptop-home               # Add new client
+  wg-admin revoke laptop-home            # Revoke client access
   wg-admin health                        # Check server health
-  wg-admin status                        # Show detailed status
+  wg-admin status                        # Show basic status
+  wg-admin detailed-status               # Show detailed client status with connections
+  wg-admin add-route laptop-home 192.168.1.0/24  # Add subnet route for client
+  wg-admin remove-route laptop-home 192.168.1.0/24 # Remove subnet route
+  wg-admin list-routes                   # List all routes
+  wg-admin list-routes laptop-home       # List routes for specific client
         """
     )
     
@@ -214,11 +395,32 @@ Examples:
     add_parser = subparsers.add_parser('add', help='Add new client')
     add_parser.add_argument('client_name', help='Name of the client to add')
     
+    # Revoke command
+    revoke_parser = subparsers.add_parser('revoke', help='Revoke client access')
+    revoke_parser.add_argument('client_name', help='Name of the client to revoke')
+    
     # Health command
     subparsers.add_parser('health', help='Check server health')
     
     # Status command
-    subparsers.add_parser('status', help='Show detailed status')
+    subparsers.add_parser('status', help='Show basic status')
+    
+    # Detailed status command
+    subparsers.add_parser('detailed-status', help='Show detailed client status with connections')
+    
+    # Add route command
+    add_route_parser = subparsers.add_parser('add-route', help='Add subnet route for client')
+    add_route_parser.add_argument('client_name', help='Name of the client')
+    add_route_parser.add_argument('subnet', help='Subnet in CIDR notation (e.g., 192.168.1.0/24)')
+    
+    # Remove route command
+    remove_route_parser = subparsers.add_parser('remove-route', help='Remove subnet route for client')
+    remove_route_parser.add_argument('client_name', help='Name of the client')
+    remove_route_parser.add_argument('subnet', help='Subnet in CIDR notation (e.g., 192.168.1.0/24)')
+    
+    # List routes command
+    list_routes_parser = subparsers.add_parser('list-routes', help='List subnet routes')
+    list_routes_parser.add_argument('client_name', nargs='?', help='Optional: specific client name')
     
     args = parser.parse_args()
     
@@ -245,10 +447,20 @@ Examples:
         admin.list_clients()
     elif args.command == 'add':
         admin.add_client(args.client_name)
+    elif args.command == 'revoke':
+        admin.revoke_client(args.client_name)
     elif args.command == 'health':
         admin.check_health()
     elif args.command == 'status':
         admin.show_status()
+    elif args.command == 'detailed-status':
+        admin.show_detailed_status()
+    elif args.command == 'add-route':
+        admin.add_route(args.client_name, args.subnet)
+    elif args.command == 'remove-route':
+        admin.remove_route(args.client_name, args.subnet)
+    elif args.command == 'list-routes':
+        admin.list_routes(args.client_name)
 
 if __name__ == '__main__':
     main()

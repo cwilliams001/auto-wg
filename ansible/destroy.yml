@@ -1,8 +1,47 @@
 ---
+# Terraform Infrastructure Destruction (runs locally)
+- hosts: localhost
+  connection: local
+  gather_facts: no
+  
+  tasks:
+    - name: Check if Terraform directory exists
+      stat:
+        path: "{{ playbook_dir }}/../terraform"
+      register: terraform_dir
+
+    - name: Destroy Terraform infrastructure
+      block:
+        - name: Run terraform destroy
+          shell: terraform destroy -auto-approve -var-file="terraform.tfvars"
+          args:
+            chdir: "{{ playbook_dir }}/../terraform"
+          ignore_errors: yes
+          register: terraform_destroy
+
+        - name: Display Terraform destroy result
+          debug:
+            msg: "Terraform destroy result: {{ terraform_destroy.stdout if terraform_destroy.stdout else 'No output' }}"
+
+        - name: Clean up Terraform state files
+          file:
+            path: "{{ item }}"
+            state: absent
+          loop:
+            - "{{ playbook_dir }}/../terraform/.terraform"
+            - "{{ playbook_dir }}/../terraform/.terraform.lock.hcl"
+            - "{{ playbook_dir }}/../terraform/terraform.tfstate"
+            - "{{ playbook_dir }}/../terraform/terraform.tfstate.backup"
+            - "{{ playbook_dir }}/../terraform/terraform.tfvars"
+          ignore_errors: yes
+      when: terraform_dir.stat.exists
+
+# Remote Server Cleanup (if still accessible)
 - hosts: wireguard_servers
   become: yes
   vars_files:
     - vars/main.yml
+  ignore_unreachable: yes
   
   tasks:
     - name: Stop and disable WireGuard service
@@ -105,3 +144,24 @@
     - name: Display cleanup complete message
       debug:
         msg: "Auto-WG infrastructure has been completely removed from {{ inventory_hostname }}"
+
+# Local Cleanup (runs after server cleanup)
+- hosts: localhost
+  connection: local
+  gather_facts: no
+  
+  tasks:
+    - name: Clean up local configuration files
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ playbook_dir }}/inventory/hosts"
+        - "{{ playbook_dir }}/inventory/vultr.yml"
+        - "{{ playbook_dir }}/../deploy.config"
+        - "{{ playbook_dir }}/../client"
+      ignore_errors: yes
+
+    - name: Display final cleanup message
+      debug:
+        msg: "Auto-WG complete destruction finished. All infrastructure, state files, and local configurations have been removed."
