@@ -92,8 +92,10 @@ echo ""
 
 # Auto-WG specific info
 echo "🚀 AUTO-WG INFO:"
-echo "   Web Interface: https://{{ domain_name }}"
-echo "   API Health: https://{{ domain_name }}/health"
+echo "   API Base URL: https://{{ domain_name }}"
+echo "   Health Check: https://{{ domain_name }}/health"
+echo "   Generate Config: POST https://{{ domain_name }}/generate_config"
+echo "   List Clients: GET https://{{ domain_name }}/list_clients"
 echo "   Log Directory: {{ wg_service_dir }}"
 echo ""
 
