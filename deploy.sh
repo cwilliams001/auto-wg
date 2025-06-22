@@ -349,7 +349,7 @@ get_server_info() {
     log_info "Getting server information..."
     
     cd terraform
-    SERVER_IP=$(terraform output -raw server_ip 2>/dev/null || echo "")
+    SERVER_IP=$(terraform output -raw wireguard_ip 2>/dev/null || echo "")
     cd ..
     
     if [[ -z "$SERVER_IP" ]]; then
@@ -441,6 +441,25 @@ cleanup() {
     fi
 }
 
+# Manual server configuration (for recovery)
+configure_existing_server() {
+    log_info "Configuring existing server..."
+    
+    if [[ -z "$SERVER_IP" ]]; then
+        log_error "No server IP found. Run get_server_info first."
+        exit 1
+    fi
+    
+    log_info "Running Ansible provisioning on $SERVER_IP..."
+    
+    # Run Ansible playbook
+    cd ansible
+    ansible-playbook -i "$SERVER_IP," -u root site.yml
+    cd ..
+    
+    log_success "Server configuration complete"
+}
+
 # Main deployment function
 main() {
     echo -e "${BLUE}"
@@ -449,6 +468,17 @@ main() {
     echo "║              One-Command WireGuard VPN Setup                ║"
     echo "╚══════════════════════════════════════════════════════════════╝"
     echo -e "${NC}"
+    
+    # Check for recovery mode
+    if [[ "$1" == "configure" ]]; then
+        log_info "Running in configuration-only mode..."
+        source "$CONFIG_FILE" 2>/dev/null || { log_error "No config file found. Run full deployment first."; exit 1; }
+        get_server_info
+        configure_existing_server
+        create_client_script
+        show_completion_info
+        exit 0
+    fi
     
     # Set up cleanup trap
     trap cleanup EXIT
@@ -469,6 +499,7 @@ main() {
     deploy_infrastructure
     get_server_info
     wait_for_server
+    configure_existing_server
     create_client_script
     
     # Success
