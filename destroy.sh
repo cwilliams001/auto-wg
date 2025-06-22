@@ -15,7 +15,6 @@ NC='\033[0m' # No Color
 # Configuration
 CONFIG_FILE="deploy.config"
 TERRAFORM_DIR="terraform"
-ANSIBLE_DIR="ansible"
 
 # Functions
 log_info() {
@@ -49,7 +48,6 @@ check_dependencies() {
     local missing_deps=()
     
     command -v terraform >/dev/null 2>&1 || missing_deps+=("terraform")
-    command -v ansible-playbook >/dev/null 2>&1 || missing_deps+=("ansible")
     
     if [ ${#missing_deps[@]} -ne 0 ]; then
         log_error "Missing dependencies: ${missing_deps[*]}"
@@ -110,7 +108,7 @@ confirm_destruction() {
     echo ""
     echo "This will:"
     echo "  💰 Destroy Vultr server instance (stops billing)"
-    echo "  🌐 Remove Cloudflare DNS records" 
+    echo "  🌐 Remove Cloudflare DNS records via Terraform" 
     echo "  🗑️  Delete all Terraform state files"
     echo "  📁 Remove local configuration and client files"
     echo ""
@@ -212,42 +210,12 @@ cleanup_local_files() {
     [[ -d "client" ]] && rm -rf client && echo "  ✓ Removed client directory"
     
     # Remove Ansible inventory files
-    [[ -f "$ANSIBLE_DIR/inventory/hosts" ]] && rm -f "$ANSIBLE_DIR/inventory/hosts" && echo "  ✓ Removed Ansible inventory"
+    [[ -f "ansible/inventory/hosts" ]] && rm -f "ansible/inventory/hosts" && echo "  ✓ Removed Ansible inventory"
     
     # Remove any backup files
     find . -name "*.bak" -delete 2>/dev/null && echo "  ✓ Removed backup files"
     
     log_success "Local cleanup completed"
-}
-
-# Optional: Clean up server before destroying (if accessible)
-cleanup_remote_server() {
-    if [[ ! -f "$CONFIG_FILE" ]] || [[ ! -f "$TERRAFORM_DIR/terraform.tfstate" ]]; then
-        return
-    fi
-    
-    log_info "Attempting to clean up server before destruction..."
-    
-    cd "$TERRAFORM_DIR"
-    SERVER_IP=$(terraform output -raw wireguard_ip 2>/dev/null || echo "")
-    cd ..
-    
-    if [[ -n "$SERVER_IP" ]]; then
-        # Test if server is accessible
-        if ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no root@$SERVER_IP "echo 'Server accessible'" >/dev/null 2>&1; then
-            log_info "Server accessible, running cleanup playbook..."
-            
-            cd "$ANSIBLE_DIR"
-            echo "[wireguard_servers]" > inventory/destroy_hosts
-            echo "$SERVER_IP ansible_user=root ansible_ssh_common_args='-o StrictHostKeyChecking=no'" >> inventory/destroy_hosts
-            
-            ansible-playbook -i inventory/destroy_hosts destroy.yml || log_warning "Remote cleanup failed"
-            rm -f inventory/destroy_hosts
-            cd ..
-        else
-            log_info "Server not accessible, skipping remote cleanup"
-        fi
-    fi
 }
 
 # Show completion message
@@ -300,9 +268,6 @@ main() {
     # Show current state and confirm
     show_current_infrastructure
     confirm_destruction
-    
-    # Clean up server first (optional)
-    cleanup_remote_server
     
     # Destroy cloud infrastructure (MOST IMPORTANT)
     destroy_terraform_infrastructure
