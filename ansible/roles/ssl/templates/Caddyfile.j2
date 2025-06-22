@@ -1,5 +1,13 @@
 # ansible/roles/ssl/templates/Caddyfile.j2
 {{ domain_name }} {
-    reverse_proxy localhost:5000
+    reverse_proxy localhost:{{ wg_service_port }}
+    encode gzip
+    header {
+        # Security headers
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+    }
     tls {{ ssl_email }}
 }
