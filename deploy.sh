@@ -134,10 +134,27 @@ configure_deployment() {
     
     # Get Cloudflare Zone ID automatically
     log_info "Fetching Cloudflare Zone ID..."
-    CLOUDFLARE_ZONE_ID=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones" \
+    
+    # Test Cloudflare API access first
+    cf_response=$(curl -s -w "HTTPSTATUS:%{http_code}" -X GET "https://api.cloudflare.com/client/v4/zones" \
         -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-        -H "Content-Type: application/json" | \
-        python3 -c "
+        -H "Content-Type: application/json")
+    
+    cf_body=$(echo "$cf_response" | sed -E 's/HTTPSTATUS:[0-9]{3}$//')
+    cf_status=$(echo "$cf_response" | tr -d '\n' | sed -E 's/.*HTTPSTATUS:([0-9]{3})$/\1/')
+    
+    if [[ "$cf_status" -ne 200 ]]; then
+        log_error "Cloudflare API request failed with status $cf_status"
+        log_error "This might be due to IP restrictions on your API token"
+        log_error "Response: $cf_body"
+        log_info "Please check:"
+        log_info "1. Your API token has correct permissions"
+        log_info "2. Your current IP is allowed to use the token"
+        log_info "3. The token is not expired"
+        exit 1
+    fi
+    
+    CLOUDFLARE_ZONE_ID=$(echo "$cf_body" | python3 -c "
 import sys, json
 try:
     data = json.load(sys.stdin)
@@ -150,8 +167,8 @@ try:
                 break
     else:
         print('ERROR: ' + str(data['errors']))
-except:
-    print('ERROR: Failed to parse response')
+except Exception as e:
+    print('ERROR: Failed to parse response - ' + str(e))
 ")
     
     if [[ "$CLOUDFLARE_ZONE_ID" == ERROR* ]]; then
@@ -166,24 +183,44 @@ except:
     
     # Get SSH key ID
     log_info "Fetching Vultr SSH keys..."
+    
+    # Test Vultr API access first
+    vultr_response=$(curl -s -w "HTTPSTATUS:%{http_code}" -H "Authorization: Bearer $VULTR_API_KEY" https://api.vultr.com/v2/ssh-keys)
+    
+    vultr_body=$(echo "$vultr_response" | sed -E 's/HTTPSTATUS:[0-9]{3}$//')
+    vultr_status=$(echo "$vultr_response" | tr -d '\n' | sed -E 's/.*HTTPSTATUS:([0-9]{3})$/\1/')
+    
+    if [[ "$vultr_status" -ne 200 ]]; then
+        log_error "Vultr API request failed with status $vultr_status"
+        log_error "This might be due to IP restrictions on your API key"
+        log_error "Response: $vultr_body"
+        log_info "Please check:"
+        log_info "1. Your API key is valid and not expired"
+        log_info "2. Your current IP is allowed to use the API key"
+        log_info "3. Your account has the necessary permissions"
+        exit 1
+    fi
+    
     echo ""
     echo "Available SSH keys:"
-    curl -s -H "Authorization: Bearer $VULTR_API_KEY" https://api.vultr.com/v2/ssh-keys | \
-        python3 -c "
+    echo "$vultr_body" | python3 -c "
 import sys, json
 try:
     data = json.load(sys.stdin)
-    for i, key in enumerate(data['ssh_keys']):
-        print(f\"{i+1}. {key['name']} ({key['id'][:8]}...)\")
-except:
-    print('ERROR: Failed to fetch SSH keys')
+    if 'ssh_keys' in data:
+        for i, key in enumerate(data['ssh_keys']):
+            print(f\"{i+1}. {key['name']} ({key['id'][:8]}...)\")
+    else:
+        print('ERROR: No ssh_keys found in response')
+        sys.exit(1)
+except Exception as e:
+    print(f'ERROR: Failed to fetch SSH keys - {e}')
     sys.exit(1)
 "
     
     echo ""
     read -p "Enter the number of the SSH key to use: " ssh_key_num
-    SSH_KEY_ID=$(curl -s -H "Authorization: Bearer $VULTR_API_KEY" https://api.vultr.com/v2/ssh-keys | \
-        python3 -c "
+    SSH_KEY_ID=$(echo "$vultr_body" | python3 -c "
 import sys, json
 try:
     data = json.load(sys.stdin)
@@ -192,8 +229,8 @@ try:
         print(keys[$ssh_key_num-1]['id'])
     else:
         print('ERROR: Invalid selection')
-except:
-    print('ERROR: Failed to parse SSH keys')
+except Exception as e:
+    print(f'ERROR: Failed to parse SSH keys - {e}')
 ")
     
     if [[ "$SSH_KEY_ID" == ERROR* ]]; then

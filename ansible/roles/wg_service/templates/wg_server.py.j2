@@ -88,27 +88,30 @@ WEB_UI_TEMPLATE = '''
         <p>WireGuard VPN Client Management Interface</p>
     </div>
 
+    {%- raw %}
     {% if message %}
     <div class="alert alert-{{ message_type }}">{{ message }}</div>
     {% endif %}
+    {%- endraw %}
 
     <div class="stats">
         <div class="stat-card">
-            <div class="stat-number">{{ total_clients }}</div>
+            <div class="stat-number">{%- raw %}{{ total_clients }}{%- endraw %}</div>
             <div>Total Clients</div>
         </div>
         <div class="stat-card">
-            <div class="stat-number">{{ connected_clients }}</div>
+            <div class="stat-number">{%- raw %}{{ connected_clients }}{%- endraw %}</div>
             <div>Connected</div>
         </div>
         <div class="stat-card">
-            <div class="stat-number">{{ available_ips }}</div>
+            <div class="stat-number">{%- raw %}{{ available_ips }}{%- endraw %}</div>
             <div>Available IPs</div>
         </div>
     </div>
 
     <div class="card">
         <h3>📋 Connected Clients</h3>
+        {%- raw %}
         {% if clients %}
         <table>
             <thead>
@@ -140,6 +143,7 @@ WEB_UI_TEMPLATE = '''
         {% else %}
         <p>No clients connected yet.</p>
         {% endif %}
+        {%- endraw %}
     </div>
 
     <div class="card">
@@ -153,6 +157,7 @@ WEB_UI_TEMPLATE = '''
         </form>
     </div>
 
+    {%- raw %}
     {% if config_data %}
     <div class="card">
         <h3>📄 Client Configuration</h3>
@@ -163,6 +168,7 @@ WEB_UI_TEMPLATE = '''
         <p><small>Save this as <code>/etc/wireguard/wg0.conf</code> on your client device.</small></p>
     </div>
     {% endif %}
+    {%- endraw %}
 
     <div class="card">
         <h3>🔧 Server Actions</h3>
