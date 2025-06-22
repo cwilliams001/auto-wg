@@ -5,20 +5,18 @@
 Auto-WG is a complete WireGuard VPN management solution that automatically:
 - Deploys a VPN server on Vultr cloud hosting
 - Sets up SSL certificates and DNS
-- Provides a web interface for managing clients  
-- Generates client configurations with one click
+- Provides REST API and CLI tools for managing clients  
+- Generates client configurations programmatically
 
 **Perfect for**: Remote work, secure browsing, accessing home networks, or anyone wanting a private VPN without monthly subscriptions.
 
 ## 🎯 What You Get
 
 - 🖥️ **Your own VPN server** hosted on Vultr ($6/month)
-- 🌐 **Web management interface** at your custom domain
+- 🛠️ **CLI management tools** for easy administration
 - 📱 **Easy client setup** - one script to connect any device
 - 🔒 **Enterprise-grade security** with automatic SSL certificates
-- 📊 **Real-time monitoring** of connected devices
-
-![Auto-WG Dashboard](https://via.placeholder.com/800x400/2c3e50/ffffff?text=Auto-WG%20Dashboard%20Screenshot)
+- 📊 **Real-time monitoring** via API and CLI tools
 
 > **💡 Status:** Battle-tested by the community. Perfect for personal and small business use.
 
@@ -32,9 +30,9 @@ Auto-WG is a complete WireGuard VPN management solution that automatically:
 
 **vs. Manual WireGuard Setup:**
 - ✅ **5 minutes** vs hours of configuration
-- ✅ **Web interface** vs command-line only
+- ✅ **CLI tools** vs raw command-line editing
 - ✅ **Automatic SSL** vs manual certificate management
-- ✅ **Client management** vs editing config files
+- ✅ **API management** vs editing config files
 
 **vs. Tailscale/Similar:**
 - ✅ **Self-hosted** - no third-party control
@@ -59,11 +57,11 @@ Auto-WG is a complete WireGuard VPN management solution that automatically:
 - **Interactive Configuration**: Guided setup with automatic API key validation
 - **Zero-Config Client Setup**: Simple client onboarding script with enhanced error handling
 
-### 🌐 **Web Management**
-- **Modern Web Interface**: Full-featured dashboard for client management
-- **Real-time Status**: Live client connection monitoring
-- **Easy Client Addition**: Add/revoke clients through web UI
-- **Configuration Display**: Copy-paste ready WireGuard configs
+### 🌐 **API Management**
+- **REST API**: Full-featured API for client management
+- **Real-time Status**: Live client connection monitoring via API
+- **Easy Client Addition**: Add/revoke clients through CLI or API
+- **Configuration Generation**: Automatic WireGuard config creation
 
 ### 🔒 **Security First**
 - **Production Hardened**: Disabled debug mode, secure file permissions
@@ -149,14 +147,22 @@ The script will:
 - ✅ Check all dependencies
 - 🔐 Securely collect your API keys  
 - 🚀 Deploy your VPN server
-- 🌐 Set up your web interface
+- 🌐 Set up SSL certificates and API endpoints
 - 📱 Generate client connection scripts
 
 ### Step 3: Connect Your Devices
 
-1. **Open your VPN dashboard**: `https://your-domain.com`
-2. **Add a device**: Click "Add Client", enter device name (e.g., "laptop")
-3. **Copy the config**: Copy the generated configuration
+1. **Use the CLI tool**: Set up wg-admin for easy management
+   ```bash
+   ./tools/wg-admin setup
+   ```
+
+2. **Add a device**: Add clients via CLI
+   ```bash
+   ./tools/wg-admin add laptop-home
+   ```
+
+3. **Get the config**: The tool will display the WireGuard configuration
 4. **On your device**: Save as `/etc/wireguard/wg0.conf` and run `wg-quick up wg0`
 
 **Or use the auto-setup script:**
@@ -300,17 +306,7 @@ ssl_email: "your-email@example.com"
 
 ## 🎮 Usage
 
-### Web Interface (Recommended)
-
-Visit `https://your-domain.com` to access the management dashboard:
-
-- **📊 Dashboard**: View client statistics and server status
-- **➕ Add Clients**: Generate new client configurations instantly
-- **👥 Manage Clients**: View, monitor, and revoke client access
-- **🔧 Server Actions**: Restart services and view logs
-- **📋 Copy Configs**: Ready-to-use WireGuard configurations
-
-### CLI Management
+### CLI Management (Primary Interface)
 
 Install and use the CLI tools:
 
@@ -342,7 +338,6 @@ security-audit                    # Run security assessment
 
 | Endpoint | Method | Description | Rate Limit |
 |----------|--------|-------------|------------|
-| `/` | GET | Web dashboard | - |
 | `/generate_config` | POST | Generate client configuration | 5/min |
 | `/list_clients` | GET | List connected clients | 10/min |
 | `/revoke_client` | POST | Revoke client access | 5/min |
@@ -412,7 +407,7 @@ sudo systemctl restart wg-quick@wg0
 curl https://your-domain.com/health
 ```
 
-**🌐 "Web interface won't load"**
+**🌐 "API endpoints won't respond"**
 - Wait 5-10 minutes after deployment for SSL certificates to be issued
 - Check Cloudflare SSL setting: Dashboard → SSL/TLS → Overview → Set to "Full"
 - Try `https://your-domain.com/health` first
