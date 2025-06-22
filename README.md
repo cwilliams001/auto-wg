@@ -78,6 +78,8 @@ Auto-WG is a complete WireGuard VPN management solution that automatically:
 - **CLI Tool**: `wg-admin` for command-line management
 - **REST API**: Programmatic client management
 - **Client Revocation**: Remove access instantly
+- **Subnet Routing**: Configure clients as subnet routers
+- **Infrastructure Destruction**: Complete teardown script
 - **Health Monitoring**: Service status checking
 
 ### 🏗️ **Infrastructure**
@@ -164,6 +166,23 @@ sudo python3 client_setup.py
 ```
 
 🎉 **Done!** Your device is now connected to your private VPN!
+
+## 🗑️ **Complete Infrastructure Removal**
+
+When you're done with your VPN or want to start fresh:
+
+```bash
+# This will completely destroy everything and stop all billing
+./destroy.sh
+```
+
+The destroy script will:
+- 💰 **Destroy Vultr server** (stops billing immediately)
+- 🌐 **Remove Cloudflare DNS records** via Terraform
+- 🗑️ **Clean up all local files** (configs, keys, state)
+- ✅ **Verify removal** with dashboard links
+
+**Important**: This action cannot be undone! The script will ask for confirmation and show you exactly what will be removed.
 
 ### Manual Setup (Advanced)
 
@@ -302,13 +321,21 @@ sudo cp tools/security-audit /usr/local/bin/
 wg-admin setup
 
 # Common operations
-wg-admin list              # List all clients
-wg-admin add laptop-home   # Add new client
-wg-admin health           # Check server health
-wg-admin status           # Detailed status
+wg-admin list                     # List all clients
+wg-admin add laptop-home          # Add new client
+wg-admin revoke laptop-home       # Revoke client access
+wg-admin health                   # Check server health
+wg-admin status                   # Basic status
+wg-admin detailed-status          # Detailed client status with connections
+
+# Subnet routing (advanced)
+wg-admin add-route laptop-home 192.168.1.0/24    # Configure subnet routing
+wg-admin remove-route laptop-home 192.168.1.0/24 # Remove subnet route
+wg-admin list-routes              # Show all routes
+wg-admin list-routes laptop-home  # Show routes for specific client
 
 # Security audit
-security-audit            # Run security assessment
+security-audit                    # Run security assessment
 ```
 
 ### API Endpoints
@@ -318,9 +345,12 @@ security-audit            # Run security assessment
 | `/` | GET | Web dashboard | - |
 | `/generate_config` | POST | Generate client configuration | 5/min |
 | `/list_clients` | GET | List connected clients | 10/min |
+| `/revoke_client` | POST | Revoke client access | 5/min |
+| `/client_status` | GET | Detailed client status with routes | 10/min |
+| `/add_route` | POST | Add subnet route for client | 5/min |
+| `/remove_route` | POST | Remove subnet route for client | 5/min |
+| `/list_routes` | GET | List all subnet routes | 10/min |
 | `/health` | GET | Check server status | 30/min |
-| `/add_client` | POST | Web form: add client | 3/min |
-| `/revoke_client` | POST | Web form: revoke client | 5/min |
 
 **Example API Usage**:
 ```bash
@@ -332,6 +362,18 @@ curl -X POST -H "Authorization: your-auth-key" \
      -H "Content-Type: application/json" \
      -d '{"client_name": "laptop"}' \
      https://wg.yourdomain.com/generate_config
+
+# Revoke client
+curl -X POST -H "Authorization: your-auth-key" \
+     -H "Content-Type: application/json" \
+     -d '{"client_name": "laptop"}' \
+     https://wg.yourdomain.com/revoke_client
+
+# Add subnet route
+curl -X POST -H "Authorization: your-auth-key" \
+     -H "Content-Type: application/json" \
+     -d '{"client_name": "router", "subnet": "192.168.1.0/24"}' \
+     https://wg.yourdomain.com/add_route
 
 # Check health
 curl https://wg.yourdomain.com/health
@@ -371,13 +413,32 @@ curl https://your-domain.com/health
 ```
 
 **🌐 "Web interface won't load"**
-- Wait 2-3 minutes after deployment for SSL to activate
+- Wait 5-10 minutes after deployment for SSL certificates to be issued
 - Check Cloudflare SSL setting: Dashboard → SSL/TLS → Overview → Set to "Full"
 - Try `https://your-domain.com/health` first
+
+**🔒 "SSL/TLS Certificate Errors"**
+```bash
+# Check certificate status on server
+ssh root@your-server-ip
+sudo journalctl -u caddy --since "10 minutes ago"
+
+# Common fixes:
+# 1. Wait 5-10 minutes for certificate issuance
+# 2. Verify DNS is pointing to correct server IP
+# 3. Check Cloudflare proxy status (should be orange cloud)
+```
 
 **🔑 "Authentication failed"**
 - Check your auth key in the deployment script output
 - Verify you're using the correct domain name
+
+**🛠️ "wg-admin SSL errors"**
+The `wg-admin` tool handles SSL certificate issues gracefully:
+- It will detect SSL certificate problems automatically
+- Offers option to retry without SSL verification during setup
+- Provides clear guidance on waiting for certificate issuance
+- Use `wg-admin setup` to reconfigure if needed
 
 **📱 "Client won't connect"**
 1. Make sure you copied the **full config** (starts with `[Interface]`)
