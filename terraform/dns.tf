@@ -6,11 +6,6 @@ resource "cloudflare_record" "wireguard" {
   type    = "A"
   proxied = false # Don't proxy through Cloudflare since this is a VPN service
 }
-#terraform/dns.tf
-resource "cloudflare_zone_settings_override" "auto_wg_zone" {
-  zone_id = var.cloudflare_zone_id
-  settings {
-    ssl = "full"
-    tls_1_3 = "on"
-  }
-}
+# Zone settings override removed - requires Zone:Edit permissions
+# You can manually set SSL to "Full" in Cloudflare dashboard if needed:
+# Dashboard → SSL/TLS → Overview → Set to "Full"
