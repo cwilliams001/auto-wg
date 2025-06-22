@@ -276,6 +276,7 @@ wireguard_auth_key   = "$WIREGUARD_AUTH_KEY"
 cloudflare_api_token = "$CLOUDFLARE_API_TOKEN"
 cloudflare_zone_id   = "$CLOUDFLARE_ZONE_ID"
 domain_name          = "$DOMAIN_NAME"
+enable_zone_settings = false  # Set to true if your API token has Zone:Edit permissions
 EOF
     
     chmod 600 "$TFVARS_FILE"

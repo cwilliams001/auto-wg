@@ -32,3 +32,9 @@ variable "domain_name" {
   type        = string
   default     = "wg.yourdomain.com"
 }
+
+variable "enable_zone_settings" {
+  description = "Enable Cloudflare zone settings override (requires Zone:Edit permissions)"
+  type        = bool
+  default     = false
+}
