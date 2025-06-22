@@ -2,8 +2,8 @@
 - name: Install Python packages
   pip:
     name:
-      - flask
-      - flask-limiter
+      - flask==2.3.3
+      - flask-limiter==3.5.0
       - requests
     state: present
 

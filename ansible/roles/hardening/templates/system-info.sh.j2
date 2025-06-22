@@ -66,7 +66,7 @@ echo ""
 
 # Service status
 echo "🔧 SERVICES:"
-for service in ssh nginx caddy wg_service fail2ban ufw; do
+for service in ssh caddy wg_service fail2ban ufw; do
     if systemctl is-active --quiet $service 2>/dev/null; then
         echo "   $service: ✅ Running"
     else

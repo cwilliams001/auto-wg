@@ -1,0 +1,107 @@
+---
+- hosts: wireguard_servers
+  become: yes
+  vars_files:
+    - vars/main.yml
+  
+  tasks:
+    - name: Stop and disable WireGuard service
+      systemd:
+        name: wg_service
+        state: stopped
+        enabled: no
+      ignore_errors: yes
+
+    - name: Stop and disable WireGuard interface
+      systemd:
+        name: wg-quick@wg0
+        state: stopped
+        enabled: no
+      ignore_errors: yes
+
+    - name: Stop and disable Caddy
+      systemd:
+        name: caddy
+        state: stopped
+        enabled: no
+      ignore_errors: yes
+
+    - name: Remove WireGuard service files
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /opt/wg_service
+        - /etc/systemd/system/wg_service.service
+        - /etc/wireguard/wg0.conf
+        - /etc/wireguard/private.key
+        - /etc/wireguard/public.key
+
+    - name: Remove Caddy configuration
+      file:
+        path: /etc/caddy/Caddyfile
+        state: absent
+      ignore_errors: yes
+
+    - name: Remove SSL certificates (Let's Encrypt)
+      file:
+        path: /etc/letsencrypt
+        state: absent
+      ignore_errors: yes
+
+    - name: Remove Python packages
+      pip:
+        name:
+          - flask
+          - flask-limiter
+          - requests
+        state: absent
+      ignore_errors: yes
+
+    - name: Remove WireGuard packages
+      package:
+        name:
+          - wireguard
+          - wireguard-tools
+        state: absent
+      ignore_errors: yes
+
+    - name: Remove Caddy
+      package:
+        name: caddy
+        state: absent
+      ignore_errors: yes
+
+    - name: Remove firewall rules
+      ufw:
+        rule: deny
+        port: "{{ item.port }}"
+        proto: "{{ item.proto }}"
+      loop:
+        - { port: "{{ wireguard_port }}", proto: "udp" }
+        - { port: "{{ wg_service_port }}", proto: "tcp" }
+        - { port: "80", proto: "tcp" }
+        - { port: "443", proto: "tcp" }
+      ignore_errors: yes
+
+    - name: Reset firewall to defaults
+      ufw:
+        state: reset
+      ignore_errors: yes
+
+    - name: Disable IP forwarding
+      sysctl:
+        name: net.ipv4.ip_forward
+        value: '0'
+        sysctl_set: yes
+        state: present
+        reload: yes
+      ignore_errors: yes
+
+    - name: Reload systemd daemon
+      systemd:
+        daemon_reload: yes
+
+    - name: Display cleanup complete message
+      debug:
+        msg: "Auto-WG infrastructure has been completely removed from {{ inventory_hostname }}"
