@@ -26,11 +26,6 @@
         port: "{{ wireguard_port }}"
         proto: udp
 
-    - name: Allow WG service port
-      ufw:
-        rule: allow
-        port: "{{ wg_service_port }}"
-        proto: tcp
     
     - name: Allow Caddy HTTP port
       ufw:

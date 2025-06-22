@@ -883,5 +883,5 @@ if __name__ == '__main__':
     except Exception as e:
         logger.warning(f"Could not set secure file permissions: {e}")
     
-    logger.info(f"Starting WireGuard service on port {{ wg_service_port }} (debug={debug_mode})")
-    app.run(host='0.0.0.0', port={{ wg_service_port }}, debug=debug_mode)
+    logger.info(f"Starting WireGuard service on localhost:{{ wg_service_port }} (debug={debug_mode})")
+    app.run(host='127.0.0.1', port={{ wg_service_port }}, debug=debug_mode)
