@@ -18,10 +18,10 @@ app.config['SECRET_KEY'] = os.environ.get('FLASK_SECRET_KEY', secrets.token_hex(
 
 # Set up rate limiting
 limiter = Limiter(
-    app,
     key_func=get_remote_address,
     default_limits=["100 per hour", "10 per minute"]
 )
+limiter.init_app(app)
 
 # Set up secure logging
 log_level = os.environ.get('LOG_LEVEL', 'INFO')
