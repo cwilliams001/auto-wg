@@ -7,7 +7,7 @@ resource "cloudflare_record" "wireguard" {
   proxied = false # Don't proxy through Cloudflare since this is a VPN service
 }
 #terraform/dns.tf
-resource "cloudflare_zone_settings_override" "echo1_dev" {
+resource "cloudflare_zone_settings_override" "auto_wg_zone" {
   zone_id = var.cloudflare_zone_id
   settings {
     ssl = "full"

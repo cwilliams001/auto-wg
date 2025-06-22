@@ -161,10 +161,18 @@ try:
     if data['success']:
         domain_parts = '$DOMAIN_NAME'.split('.')
         root_domain = '.'.join(domain_parts[-2:])
+        print(f'DEBUG: Looking for zone matching: {root_domain}', file=sys.stderr)
+        
+        found_zones = []
         for zone in data['result']:
+            found_zones.append(f\"{zone['name']} ({zone['id'][:8]}...)\")
             if zone['name'] == root_domain:
+                print(f'DEBUG: Found matching zone: {zone[\"name\"]} -> {zone[\"id\"]}', file=sys.stderr)
                 print(zone['id'])
-                break
+                sys.exit(0)
+        
+        print(f'DEBUG: Available zones: {found_zones}', file=sys.stderr)
+        print(f'ERROR: No zone found for {root_domain}')
     else:
         print('ERROR: ' + str(data['errors']))
 except Exception as e:
@@ -304,6 +312,12 @@ deploy_infrastructure() {
     log_info "Deploying infrastructure with Terraform..."
     
     cd terraform
+    
+    # Clean up any leftover state if this is a fresh deployment
+    if [[ ! -f ".terraform.lock.hcl" ]]; then
+        log_info "Cleaning up any leftover Terraform state..."
+        rm -rf .terraform* terraform.tfstate* 2>/dev/null || true
+    fi
     
     # Initialize Terraform
     log_info "Initializing Terraform..."
